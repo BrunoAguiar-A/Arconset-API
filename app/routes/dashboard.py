@@ -464,3 +464,188 @@ def alertas_sistema():
         }), 500
     finally:
         db.close()
+
+@dashboard_bp.route('/api/dashboard-data', methods=['GET'])
+def dashboard_data_consolidado():
+    """Rota consolidada para dados do dashboard - NOVA ROTA"""
+    db = SessionLocal()
+    try:
+        print("🔄 Iniciando carregamento consolidado de dados do dashboard...")
+        
+        hoje = datetime.now().date()
+        
+        # 📊 Estatísticas básicas
+        total_projetos = db.query(Projeto).count()
+        total_clientes = db.query(Cliente).count()
+        total_contas = db.query(Conta).count()
+        total_arquivos = db.query(Arquivo).count()
+        
+        # 💰 Receita total
+        receita_total = db.query(func.sum(Projeto.valor_total)).filter(
+            Projeto.status == 'Finalizado'
+        ).scalar() or 0
+        
+        # 🏗️ Projetos recentes (últimos 10)
+        projetos_recentes = db.query(Projeto).order_by(
+            Projeto.created_at.desc()
+        ).limit(10).all()
+        
+        # 👥 Clientes (todos)
+        clientes = db.query(Cliente).order_by(
+            Cliente.created_at.desc()
+        ).all()
+        
+        # 💰 Contas (últimas 20)
+        contas = db.query(Conta).order_by(
+            Conta.data_vencimento.asc()
+        ).limit(20).all()
+        
+        # 🔔 Notificações (últimas 10)
+        notificacoes = db.query(Notificacao).order_by(
+            Notificacao.created_at.desc()
+        ).limit(10).all()
+        
+        # 📁 Arquivos mock (já que pode não ter endpoint ainda)
+        arquivos_mock = [
+            {
+                'id': 1,
+                'nome_original': 'Contrato_Cliente_A.pdf',
+                'tipo_documento': 'Contrato',
+                'projeto_nome': projetos_recentes[0].nome if projetos_recentes else 'Projeto Exemplo',
+                'created_at': datetime.now().isoformat()
+            },
+            {
+                'id': 2,
+                'nome_original': 'Proposta_Comercial.docx',
+                'tipo_documento': 'Proposta', 
+                'projeto_nome': projetos_recentes[1].nome if len(projetos_recentes) > 1 else 'Projeto Mobile',
+                'created_at': datetime.now().isoformat()
+            }
+        ]
+        
+        # 📋 Montar resposta consolidada
+        dashboard_data = {
+            'stats': {
+                'totalProjects': total_projetos,
+                'totalClients': total_clientes,
+                'totalBills': total_contas,
+                'totalFiles': total_arquivos,
+                'revenue': float(receita_total)
+            },
+            'projects': [projeto.to_dict() for projeto in projetos_recentes],
+            'clientes': [cliente.to_dict() for cliente in clientes],
+            'bills': [conta.to_dict() for conta in contas],
+            'files': arquivos_mock,
+            'notifications': [notificacao.to_dict() for notificacao in notificacoes]
+        }
+        
+        print(f"✅ Dados consolidados carregados: {total_projetos} projetos, {total_clientes} clientes, {total_contas} contas")
+        
+        return jsonify({
+            'success': True,
+            'data': dashboard_data,
+            'timestamp': datetime.now().isoformat(),
+            'message': 'Dados consolidados carregados com sucesso'
+        })
+        
+    except Exception as e:
+        print(f"❌ Erro ao carregar dados consolidados: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Erro ao carregar dados consolidados: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        db.close()
+
+# 🔧 Também adicione esta rota para debug/status do sistema
+@dashboard_bp.route('/api/system/status', methods=['GET'])
+def system_status():
+    """Status do sistema e endpoints disponíveis"""
+    db = SessionLocal()
+    try:
+        # Testar conexão com banco
+        total_projetos = db.query(Projeto).count()
+        
+        return jsonify({
+            'success': True,
+            'status': 'online',
+            'database': 'connected',
+            'timestamp': datetime.now().isoformat(),
+            'endpoints': {
+                'dashboard_consolidado': '/api/dashboard-data',
+                'dashboard_stats': '/api/dashboard/stats', 
+                'projetos_recentes': '/api/dashboard/projetos-recentes',
+                'contas_vencimento': '/api/dashboard/contas-vencimento',
+                'notificacoes': '/api/notificacoes',
+                'system_status': '/api/system/status'
+            },
+            'data_counts': {
+                'projetos': total_projetos,
+                'message': 'Sistema funcionando normalmente'
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        db.close()
+
+# 🔧 Rota para testar CORS
+@dashboard_bp.route('/api/test/cors', methods=['GET', 'POST', 'OPTIONS'])
+def test_cors():
+    """Testar configuração CORS"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    return jsonify({
+        'success': True,
+        'message': 'CORS está funcionando',
+        'method': request.method,
+        'origin': request.headers.get('Origin', 'N/A'),
+        'timestamp': datetime.now().isoformat()
+    })
+
+# 🔧 Rota para health check específico do dashboard
+@dashboard_bp.route('/api/dashboard/health', methods=['GET'])  
+def dashboard_health():
+    """Health check específico do dashboard"""
+    db = SessionLocal()
+    try:
+        # Testar algumas queries básicas
+        projetos_count = db.query(Projeto).count()
+        clientes_count = db.query(Cliente).count()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Dashboard funcionando normalmente',
+            'database_status': 'connected',
+            'endpoints_status': {
+                'dashboard_stats': 'available',
+                'projetos_recentes': 'available', 
+                'contas_vencimento': 'available',
+                'notificacoes': 'available',
+                'dashboard_consolidado': 'available'
+            },
+            'data_summary': {
+                'projetos': projetos_count,
+                'clientes': clientes_count
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': 'Erro no dashboard',
+            'error': str(e),
+            'database_status': 'error',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        db.close()

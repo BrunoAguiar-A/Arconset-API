@@ -1,7 +1,7 @@
 # 📁 models/user.py - NOVO ARQUIVO
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
 from sqlalchemy.sql import func
-from database import Base
+from app.database import Base
 import bcrypt
 import secrets
 from datetime import datetime, timedelta, UTC

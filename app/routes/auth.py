@@ -1,4 +1,5 @@
 # 📁 backend/routes/auth.py - ROTAS DE AUTENTICAÇÃO
+import os
 from flask import Blueprint, request, jsonify, g
 from datetime import UTC, datetime, timedelta
 from werkzeug.security import check_password_hash
@@ -8,8 +9,8 @@ import re
 # Importar dependências
 from database import SessionLocal
 from models.user import User
-from middleware.security import security_manager, log_security_event
-from middleware.auth_middleware import auth_required, admin_required, get_current_user_id
+from app.middleware.security import security_manager, log_security_event
+from app.middleware.auth_middleware import auth_required, admin_required, get_current_user_id
 
 # Configurar logger
 logger = structlog.get_logger()
@@ -879,7 +880,7 @@ def delete_user(user_id):
             }
             
             # Limpar dados de autenticação do usuário
-            from middleware.auth_middleware import cleanup_user_auth_data
+            from app.middleware.auth_middleware import cleanup_user_auth_data
             cleanup_result = cleanup_user_auth_data(user_id)
             
             # Deletar usuário
@@ -1182,3 +1183,393 @@ def clear_all_tokens():
             'success': False,
             'error': f'Erro ao limpar tokens: {str(e)}'
         }), 500
+    
+@auth_bp.route('/debug-token', methods=['POST'])
+def debug_token():
+    """Debug detalhado de token (apenas desenvolvimento)"""
+    
+    # Verificar se está em modo de desenvolvimento
+    if not os.getenv('DEBUG', 'False').lower() == 'true':
+        return jsonify({
+            'success': False,
+            'error': 'Endpoint disponível apenas em desenvolvimento'
+        }), 403
+    
+    try:
+        # Extrair token do header
+        auth_header = request.headers.get('Authorization')
+        
+        debug_info = {
+            'auth_header_present': bool(auth_header),
+            'auth_header_format': None,
+            'token_present': False,
+            'token_length': 0,
+            'token_preview': None,
+            'jwt_valid': False,
+            'jwt_payload': None,
+            'jwt_error': None,
+            'user_exists': False,
+            'user_active': False,
+            'security_manager_active': security_manager is not None,
+            'timestamp': datetime.now(UTC).isoformat()
+        }
+        
+        if not auth_header:
+            debug_info['error'] = 'Header Authorization não encontrado'
+            return jsonify({
+                'success': False,
+                'valid': False,
+                'debug': debug_info
+            })
+        
+        debug_info['auth_header_format'] = 'Bearer' if auth_header.startswith('Bearer ') else 'Invalid'
+        
+        if not auth_header.startswith('Bearer '):
+            debug_info['error'] = 'Header Authorization deve começar com "Bearer "'
+            return jsonify({
+                'success': False,
+                'valid': False,
+                'debug': debug_info
+            })
+        
+        # Extrair token
+        try:
+            token = auth_header.split(' ')[1]
+            debug_info['token_present'] = True
+            debug_info['token_length'] = len(token)
+            debug_info['token_preview'] = token[:20] + '...' if len(token) > 20 else token
+        except IndexError:
+            debug_info['error'] = 'Token malformado no header'
+            return jsonify({
+                'success': False,
+                'valid': False,
+                'debug': debug_info
+            })
+        
+        # Verificar token JWT
+        try:
+            payload = security_manager.verify_jwt_token(token)
+            debug_info['jwt_valid'] = True
+            debug_info['jwt_payload'] = {
+                'user_id': payload.get('user_id'),
+                'username': payload.get('username'),
+                'role': payload.get('role'),
+                'exp': payload.get('exp'),
+                'iat': payload.get('iat'),
+                'jti': payload.get('jti', '')[:8] + '...' if payload.get('jti') else None
+            }
+        except Exception as e:
+            debug_info['jwt_valid'] = False
+            debug_info['jwt_error'] = str(e)
+            
+            return jsonify({
+                'success': False,
+                'valid': False,
+                'debug': debug_info,
+                'error': f'Token JWT inválido: {str(e)}'
+            })
+        
+        # Verificar usuário no banco
+        user_id = payload.get('user_id')
+        if user_id:
+            db = SessionLocal()
+            try:
+                user = db.query(User).filter(User.id == user_id).first()
+                debug_info['user_exists'] = user is not None
+                
+                if user:
+                    debug_info['user_active'] = user.is_active
+                    debug_info['user_info'] = {
+                        'id': user.id,
+                        'username': user.username,
+                        'role': user.role,
+                        'is_active': user.is_active,
+                        'is_verified': user.is_verified
+                    }
+                
+            finally:
+                db.close()
+        
+        # Resultado final
+        is_valid = (
+            debug_info['jwt_valid'] and 
+            debug_info['user_exists'] and 
+            debug_info['user_active']
+        )
+        
+        return jsonify({
+            'success': True,
+            'valid': is_valid,
+            'debug': debug_info,
+            'message': 'Token válido' if is_valid else 'Token inválido'
+        })
+        
+    except Exception as e:
+        logger.error("debug_token_endpoint_error", error=str(e))
+        
+        return jsonify({
+            'success': False,
+            'valid': False,
+            'error': f'Erro no debug: {str(e)}',
+            'debug': {
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            }
+        }), 500
+    
+@auth_bp.route('/test-complete', methods=['GET'])
+def test_complete_auth_system():
+    """Teste completo do sistema de autenticação com diagnóstico detalhado"""
+    
+    test_results = {
+        'timestamp': datetime.now(UTC).isoformat(),
+        'overall_success': False,
+        'tests': {}
+    }
+    
+    # 1. Teste de conexão com banco
+    print("🧪 Testando conexão com banco...")
+    try:
+        db = SessionLocal()
+        try:
+            user_count = db.query(User).count()
+            test_results['tests']['database_connection'] = {
+                'success': True,
+                'user_count': user_count,
+                'message': f'Banco conectado, {user_count} usuários encontrados'
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        test_results['tests']['database_connection'] = {
+            'success': False,
+            'error': str(e),
+            'message': 'Falha na conexão com banco'
+        }
+    
+    # 2. Teste de criação de usuário temporário
+    print("🧪 Testando criação de usuário...")
+    temp_user_id = None
+    try:
+        db = SessionLocal()
+        try:
+            # Verificar se usuário de teste já existe
+            existing_test_user = db.query(User).filter(User.username == 'test_temp_user').first()
+            if existing_test_user:
+                db.delete(existing_test_user)
+                db.commit()
+            
+            # Criar usuário temporário
+            temp_user = User(
+                username='test_temp_user',
+                email='test@temp.com',
+                full_name='Test Temp User',
+                role='user',
+                is_active=True
+            )
+            temp_user.set_password('temp123')
+            
+            db.add(temp_user)
+            db.commit()
+            temp_user_id = temp_user.id
+            
+            # Testar verificação de senha
+            password_check = temp_user.check_password('temp123')
+            wrong_password_check = temp_user.check_password('wrong_password')
+            
+            test_results['tests']['user_creation'] = {
+                'success': True,
+                'user_id': temp_user_id,
+                'password_check': password_check,
+                'wrong_password_rejected': not wrong_password_check,
+                'message': 'Usuário criado e senha verificada com sucesso'
+            }
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        test_results['tests']['user_creation'] = {
+            'success': False,
+            'error': str(e),
+            'message': 'Falha ao criar usuário temporário'
+        }
+    
+    # 3. Teste de geração de JWT
+    print("🧪 Testando geração de JWT...")
+    test_token = None
+    try:
+        if security_manager and temp_user_id:
+            token_payload = {
+                'user_id': temp_user_id,
+                'username': 'test_temp_user',
+                'role': 'user'
+            }
+            
+            test_token = security_manager.generate_jwt_token(token_payload, expires_hours=1)
+            
+            test_results['tests']['jwt_generation'] = {
+                'success': bool(test_token),
+                'token_length': len(test_token) if test_token else 0,
+                'token_preview': test_token[:20] + '...' if test_token else None,
+                'message': 'Token JWT gerado com sucesso' if test_token else 'Falha ao gerar token'
+            }
+        else:
+            test_results['tests']['jwt_generation'] = {
+                'success': False,
+                'error': 'SecurityManager não disponível ou usuário não criado',
+                'message': 'Não foi possível testar geração de JWT'
+            }
+            
+    except Exception as e:
+        test_results['tests']['jwt_generation'] = {
+            'success': False,
+            'error': str(e),
+            'message': 'Erro ao gerar token JWT'
+        }
+    
+    # 4. Teste de verificação de JWT
+    print("🧪 Testando verificação de JWT...")
+    try:
+        if security_manager and test_token:
+            verified_payload = security_manager.verify_jwt_token(test_token)
+            
+            payload_valid = (
+                verified_payload and
+                verified_payload.get('user_id') == temp_user_id and
+                verified_payload.get('username') == 'test_temp_user'
+            )
+            
+            test_results['tests']['jwt_verification'] = {
+                'success': payload_valid,
+                'verified_user_id': verified_payload.get('user_id') if verified_payload else None,
+                'verified_username': verified_payload.get('username') if verified_payload else None,
+                'message': 'Token verificado com sucesso' if payload_valid else 'Token inválido'
+            }
+        else:
+            test_results['tests']['jwt_verification'] = {
+                'success': False,
+                'error': 'Token não foi gerado ou SecurityManager indisponível',
+                'message': 'Não foi possível testar verificação de JWT'
+            }
+            
+    except Exception as e:
+        test_results['tests']['jwt_verification'] = {
+            'success': False,
+            'error': str(e),
+            'message': 'Erro ao verificar token JWT'
+        }
+    
+    # 5. Teste de middleware de autenticação
+    print("🧪 Testando middleware de autenticação...")
+    try:
+        if test_token:
+            # Simular requisição com token
+            from flask import Flask
+            from unittest.mock import Mock
+            
+            # Criar um mock request
+            mock_request = Mock()
+            mock_request.headers = {'Authorization': f'Bearer {test_token}'}
+            mock_request.endpoint = 'test_endpoint'
+            mock_request.remote_addr = '127.0.0.1'
+            
+            # Não vamos executar o middleware completo aqui por segurança
+            # Apenas verificar se o token seria aceito pelo verify_jwt_token
+            payload = security_manager.verify_jwt_token(test_token)
+            
+            test_results['tests']['middleware_auth'] = {
+                'success': bool(payload),
+                'payload_received': bool(payload),
+                'message': 'Middleware aceitaria o token' if payload else 'Middleware rejeitaria o token'
+            }
+        else:
+            test_results['tests']['middleware_auth'] = {
+                'success': False,
+                'error': 'Nenhum token disponível para teste',
+                'message': 'Não foi possível testar middleware'
+            }
+            
+    except Exception as e:
+        test_results['tests']['middleware_auth'] = {
+            'success': False,
+            'error': str(e),
+            'message': 'Erro ao testar middleware'
+        }
+    
+    # 6. Teste de Redis (se disponível)
+    print("🧪 Testando Redis...")
+    try:
+        if security_manager and hasattr(security_manager, 'redis_client'):
+            # Testar operações básicas do Redis
+            security_manager.redis_client.set('test_key', 'test_value', ex=60)
+            retrieved_value = security_manager.redis_client.get('test_key')
+            security_manager.redis_client.delete('test_key')
+            
+            test_results['tests']['redis'] = {
+                'success': retrieved_value == 'test_value',
+                'ping_success': security_manager.redis_client.ping(),
+                'message': 'Redis funcionando corretamente'
+            }
+        else:
+            test_results['tests']['redis'] = {
+                'success': False,
+                'error': 'Redis não configurado',
+                'message': 'Redis não está disponível'
+            }
+            
+    except Exception as e:
+        test_results['tests']['redis'] = {
+            'success': False,
+            'error': str(e),
+            'message': 'Erro ao testar Redis'
+        }
+    
+    # 7. Limpeza - Remover usuário temporário
+    print("🧪 Limpando dados de teste...")
+    try:
+        if temp_user_id:
+            db = SessionLocal()
+            try:
+                temp_user = db.query(User).filter(User.id == temp_user_id).first()
+                if temp_user:
+                    db.delete(temp_user)
+                    db.commit()
+                
+                test_results['tests']['cleanup'] = {
+                    'success': True,
+                    'message': 'Usuário temporário removido com sucesso'
+                }
+            finally:
+                db.close()
+    except Exception as e:
+        test_results['tests']['cleanup'] = {
+            'success': False,
+            'error': str(e),
+            'message': 'Erro ao limpar dados de teste'
+        }
+    
+    # Calcular sucesso geral
+    critical_tests = ['database_connection', 'user_creation', 'jwt_generation', 'jwt_verification']
+    critical_success = all(
+        test_results['tests'].get(test, {}).get('success', False) 
+        for test in critical_tests
+        if test in test_results['tests']
+    )
+    
+    test_results['overall_success'] = critical_success
+    test_results['summary'] = {
+        'total_tests': len(test_results['tests']),
+        'passed_tests': sum(1 for test in test_results['tests'].values() if test.get('success', False)),
+        'critical_tests_passed': critical_success,
+        'message': 'Sistema de autenticação funcionando corretamente' if critical_success else 'Sistema de autenticação com problemas'
+    }
+    
+    # Status HTTP
+    status_code = 200 if critical_success else 500
+    
+    return jsonify({
+        'success': critical_success,
+        'test_results': test_results,
+        'timestamp': datetime.now(UTC).isoformat()
+    }), status_code

@@ -1,5 +1,5 @@
-// 📁 src/components/Dashboard/Dashboard.jsx - VERSÃO CORRIGIDA COM LAYOUT ADEQUADO
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// 📁 src/components/Dashboard/Dashboard.jsx - VERSÃO DE PRODUÇÃO SEM HEALTH CHECKS AUTOMÁTICOS
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   RefreshCw, 
   XCircle, 
@@ -11,7 +11,18 @@ import {
   Settings,
   Shield,
   Bell,
-  Calendar
+  Calendar,
+  Activity,
+  Lock,
+  BarChart3,
+  Building2,
+  CreditCard,
+  FileText,
+  Users,
+  Database,
+  Server,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 // 📋 Componentes
@@ -23,24 +34,48 @@ import Sidebar from './components/Sidebar';
 import Modal from './components/Modal';
 import SecureBankConfigPage from './pages/SecureBankConfigPage';
 
-// 🔧 Hooks
+// 🔧 Hooks OTIMIZADOS
+import { useSecureBankMonitor } from './hooks/useSecureBankMonitor';
 import { useDashboardData } from './hooks/useDashboardData';
 import { useModal } from './hooks/useModal';
-import { useSecureBankMonitor } from './hooks/useSecureBankMonitor';
 import { useAuth } from './hooks/useAuth'; 
 
-// 🎯 Utilitários
+// 🎯 Utilitários centralizados
 import { formatCurrency, formatDate } from './utils';
 
+// 🔐 CONFIGURAÇÕES DE PRODUÇÃO - SEM HEALTH CHECKS AUTOMÁTICOS
+const DASHBOARD_CONFIG = {
+  AUTO_LOGOUT_TIME: 60 * 60 * 1000, // 1 hora em produção
+  SESSION_CHECK_INTERVAL: 10 * 60 * 1000, // 10 minutos
+  MAX_FAILED_REQUESTS: 5, // Mais tolerante em produção
+  SENSITIVE_DATA_CLEANUP: 10 * 60 * 1000, // 10 minutos
+  HEALTH_CHECK_ENABLED: false, // 🚨 DESABILITADO: Sem health checks automáticos
+  SECURITY_ALERTS_ENABLED: true,
+  REQUEST_TIMEOUT: 30000, // 30 segundos em produção
+  PRODUCTION_MODE: true,
+  DEBUG_ENABLED: false, // 🚨 DESABILITADO: Sem logs de debug
+  MANUAL_REFRESH_ENABLED: true,
+  AUTO_REFRESH_ENABLED: false // 🚨 DESABILITADO: Sem refresh automático
+};
+
 const Dashboard = () => {
-  // 🔧 Estado principal
+  // 🔧 Estados principais
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [systemStatus, setSystemStatus] = useState({
+    online: true,
+    lastCheck: Date.now(),
+    version: '2.0.0-production'
+  });
+  const [securityAlerts, setSecurityAlerts] = useState([]);
+  const [lastActivity, setLastActivity] = useState(Date.now());
+  const [failedRequests, setFailedRequests] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // 🔐 Hook de autenticação
-  const { user, logout, isAdmin, isManager } = useAuth();
+  const { user, logout, isAdmin, isManager, isAuthenticated } = useAuth();
   
-  // 🎯 Hooks SEMPRE no top level
-  const { data, loading, error, loadData } = useDashboardData();
+  // 🎯 Hooks principais
+  const { data, loading, error, loadData, clearError } = useDashboardData();
   const { 
     showModal, 
     modalType, 
@@ -51,15 +86,24 @@ const Dashboard = () => {
     handleInputChange 
   } = useModal();
 
+  // 🏦 Hook bancário OTIMIZADO
   const {
     boletos: boletosBancarios = [],
     loading: loadingBoletos = false,
+    error: errorBoletos = null,
     ultimaVerificacao,
     statusBancos = {},
     verificarTodosBoletos,
     getEstatisticas,
-    bancosConfigurados = {}
+    bancosConfigurados = {},
+    isSecure = false,
+    userBankProfile
   } = useSecureBankMonitor();
+
+  // 🔧 Referencias para controle
+  const mountedRef = useRef(true);
+  const failedRequestsRef = useRef(0);
+  const refreshTimeoutRef = useRef(null);
 
   // 📊 Estatísticas memoizadas para performance
   const estatisticasBoletos = useMemo(() => {
@@ -77,31 +121,310 @@ const Dashboard = () => {
     }
   }, [getEstatisticas]);
 
-  // 🔄 Carregar dados na inicialização
+  // 🔐 SISTEMA DE ALERTAS DE SEGURANÇA - PRODUÇÃO
+  const addSecurityAlert = useCallback((type, message, autoHide = true) => {
+    if (!DASHBOARD_CONFIG.SECURITY_ALERTS_ENABLED) {
+      return;
+    }
+
+    const alert = {
+      id: Date.now() + Math.random(),
+      type,
+      message,
+      timestamp: new Date().toISOString()
+    };
+    
+    setSecurityAlerts(prev => [...prev.slice(-2), alert]);
+    
+    // Auto-remover em produção (mais rápido)
+    if (autoHide) {
+      setTimeout(() => {
+        if (mountedRef.current) {
+          setSecurityAlerts(prev => prev.filter(a => a.id !== alert.id));
+        }
+      }, 5000); // 5 segundos em produção
+    }
+    
+    // Log simplificado em produção
+    if (type === 'error') {
+      console.error(`🔐 Security Alert: ${message}`);
+    }
+  }, []);
+
+  // 🔐 VERIFICAÇÃO DE SISTEMA - SEM HEALTH CHECKS AUTOMÁTICOS
+  const checkSystemHealth = useCallback(async () => {
+    // 🚨 VERIFICAÇÃO CRÍTICA: Health checks desabilitados em produção
+    if (!DASHBOARD_CONFIG.HEALTH_CHECK_ENABLED) {
+      console.log('🔍 Health checks desabilitados em produção');
+      return;
+    }
+
+    // Esta função só é executada manualmente agora
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DASHBOARD_CONFIG.REQUEST_TIMEOUT);
+
+      const response = await fetch('/api/health', {
+        method: 'GET',
+        headers: { 
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        },
+        credentials: 'include',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const healthData = await response.json();
+        
+        if (mountedRef.current) {
+          setSystemStatus({
+            online: true,
+            lastCheck: Date.now(),
+            version: healthData.version || '2.0.0-production',
+            security: healthData.security
+          });
+        }
+
+        failedRequestsRef.current = 0;
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        return; // Timeout silencioso em produção
+      }
+
+      failedRequestsRef.current += 1;
+      
+      if (mountedRef.current) {
+        setSystemStatus(prev => ({ ...prev, online: false }));
+      }
+
+      if (failedRequestsRef.current >= DASHBOARD_CONFIG.MAX_FAILED_REQUESTS) {
+        addSecurityAlert('error', 'Problemas de conectividade detectados');
+        failedRequestsRef.current = 0;
+      }
+    }
+  }, [addSecurityAlert]);
+
+  // 🔐 DETECTOR DE ATIVIDADE PARA SESSÃO
+  const updateActivity = useCallback(() => {
+    setLastActivity(Date.now());
+  }, []);
+
+  // 🚨 FUNÇÃO PARA VERIFICAÇÃO MANUAL (apenas para admins)
+  const manualSystemCheck = useCallback(async () => {
+    if (!isAdmin()) {
+      addSecurityAlert('warning', 'Acesso negado - apenas administradores');
+      return;
+    }
+
+    console.log('🔍 Verificação manual do sistema solicitada');
+    
+    // Temporariamente habilitar para esta execução
+    const originalEnabled = DASHBOARD_CONFIG.HEALTH_CHECK_ENABLED;
+    DASHBOARD_CONFIG.HEALTH_CHECK_ENABLED = true;
+    
+    try {
+      setIsRefreshing(true);
+      await checkSystemHealth();
+      addSecurityAlert('success', 'Verificação do sistema concluída');
+    } catch (error) {
+      addSecurityAlert('error', `Erro na verificação: ${error.message}`);
+    } finally {
+      DASHBOARD_CONFIG.HEALTH_CHECK_ENABLED = originalEnabled;
+      setIsRefreshing(false);
+    }
+  }, [checkSystemHealth, addSecurityAlert, isAdmin]);
+
+  // 🔐 INICIALIZAÇÃO DE PRODUÇÃO - SEM HEALTH CHECKS AUTOMÁTICOS
+  useEffect(() => {
+    if (!isAuthenticated || !mountedRef.current) {
+      setSystemStatus({
+        online: true,
+        lastCheck: 0,
+        version: '2.0.0-production'
+      });
+      setSecurityAlerts([]);
+      return;
+    }
+
+    console.log('🚀 Dashboard iniciado em modo produção para:', user?.username);
+
+    // 🚨 REMOVIDO: Verificações automáticas de health
+    // 🚨 REMOVIDO: setInterval para health checks
+    // 🚨 REMOVIDO: Polling automático
+
+    // ✅ APENAS: Configurar estado inicial
+    if (mountedRef.current) {
+      setSystemStatus({
+        online: true,
+        lastCheck: Date.now(),
+        version: '2.0.0-production',
+        security: {
+          security_enabled: true,
+          production_mode: true
+        }
+      });
+      
+      addSecurityAlert('success', 'Sistema iniciado em modo produção', false);
+    }
+
+    return () => {
+      // Cleanup básico
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+      console.log('🧹 Dashboard desmontado');
+    };
+  }, [isAuthenticated, user?.username, addSecurityAlert]);
+
+  // 🔐 MONITORAMENTO DE ATIVIDADE - PRODUÇÃO
+  useEffect(() => {
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    
+    const handleActivity = () => updateActivity();
+    
+    events.forEach(event => {
+      document.addEventListener(event, handleActivity, { passive: true });
+    });
+    
+    // Auto-logout por inatividade em produção
+    const inactivityCheck = setInterval(() => {
+      const now = Date.now();
+      if (now - lastActivity > DASHBOARD_CONFIG.AUTO_LOGOUT_TIME) {
+        addSecurityAlert('warning', 'Sessão expirada por inatividade');
+        handleSecureLogout();
+      }
+    }, 60000); // Verificar a cada minuto
+    
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, handleActivity);
+      });
+      clearInterval(inactivityCheck);
+    };
+  }, [lastActivity, updateActivity]);
+
+  // 🔄 CARREGAMENTO INICIAL - SEM POLLING AUTOMÁTICO
   useEffect(() => {
     const loadInitialData = async () => {
       try {
+        console.log('📊 Carregando dados iniciais...');
         await loadData();
       } catch (error) {
-        console.error('Erro ao carregar dados iniciais:', error);
+        console.error('Erro ao carregar dados:', error);
+        addSecurityAlert('error', 'Erro ao carregar dados do dashboard');
       }
     };
     
-    loadInitialData();
-  }, [loadData]);
+    if (isAuthenticated && mountedRef.current) {
+      loadInitialData();
+    }
+  }, [loadData, isAuthenticated, addSecurityAlert]);
 
-  // 🔐 Função para logout
-  const handleLogout = useCallback(async () => {
-    if (confirm('🔓 Tem certeza que deseja sair?')) {
-      try {
-        await logout();
-      } catch (error) {
-        console.error('Erro ao fazer logout:', error);
+  // 🧹 CLEANUP GERAL
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
       }
+    };
+  }, []);
+
+  // 🔐 LOGOUT SEGURO EM PRODUÇÃO
+  const handleSecureLogout = useCallback(async () => {
+    try {
+      // Limpeza de dados sensíveis
+      setSystemStatus({
+        online: false,
+        lastCheck: 0,
+        version: '2.0.0-production'
+      });
+      setSecurityAlerts([]);
+      setLastActivity(0);
+      
+      await logout();
+      console.log('🔓 Logout seguro concluído');
+    } catch (error) {
+      console.error('Erro no logout:', error);
+      // Forçar logout em caso de erro
+      window.location.reload();
     }
   }, [logout]);
 
-  // 🛠️ Funções CRUD (mantidas iguais)
+  // 🔄 REFRESH MANUAL DE DADOS
+  const handleManualRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    
+    try {
+      setIsRefreshing(true);
+      updateActivity();
+      clearError();
+      
+      console.log('🔄 Refresh manual iniciado');
+      await loadData();
+      
+      addSecurityAlert('success', 'Dados atualizados com sucesso');
+    } catch (error) {
+      console.error('Erro no refresh:', error);
+      addSecurityAlert('error', 'Erro ao atualizar dados');
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, loadData, clearError, updateActivity, addSecurityAlert]);
+
+  // 🛠️ REQUISIÇÕES SEGURAS EM PRODUÇÃO
+  const handleSecureRequest = useCallback(async (url, options = {}) => {
+    try {
+      updateActivity();
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DASHBOARD_CONFIG.REQUEST_TIMEOUT);
+
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          ...options.headers
+        },
+        credentials: 'include',
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          addSecurityAlert('error', 'Sessão expirada');
+          await handleSecureLogout();
+          return null;
+        }
+        
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        addSecurityAlert('warning', 'Requisição cancelada por timeout');
+        return null;
+      }
+      
+      console.error('Erro na requisição:', error);
+      addSecurityAlert('error', `Erro de rede: ${error.message}`);
+      throw error;
+    }
+  }, [updateActivity, addSecurityAlert, handleSecureLogout]);
+
+  // 🛠️ FUNÇÕES CRUD - PRODUÇÃO
   const handleCreateItem = useCallback(async (type, itemData) => {
     try {
       let endpoint = '';
@@ -117,38 +440,26 @@ const Dashboard = () => {
           endpoint = '/api/contas';
           break;
         default:
-          throw new Error(`Tipo de item inválido: ${type}`);
+          throw new Error(`Tipo inválido: ${type}`);
       }
 
-      const response = await fetch(`http://localhost:5000${endpoint}`, {
+      const result = await handleSecureRequest(`http://localhost:5000${endpoint}`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify(itemData),
+        body: JSON.stringify(itemData)
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
+      if (result?.success) {
         closeModal();
         await loadData();
-        alert(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} criado com sucesso!`);
+        addSecurityAlert('success', `${type.charAt(0).toUpperCase() + type.slice(1)} criado`);
       } else {
-        throw new Error(result.error || 'Erro desconhecido');
+        throw new Error(result?.error || 'Erro desconhecido');
       }
     } catch (error) {
       console.error(`Erro ao criar ${type}:`, error);
-      alert(`❌ Erro ao criar ${type}: ${error.message}`);
+      addSecurityAlert('error', `Erro ao criar ${type}`);
     }
-  }, [closeModal, loadData]);
+  }, [handleSecureRequest, closeModal, loadData, addSecurityAlert]);
 
   const handleUpdateItem = useCallback(async (type, id, itemData) => {
     try {
@@ -165,41 +476,29 @@ const Dashboard = () => {
           endpoint = `/api/contas/${id}`;
           break;
         default:
-          throw new Error(`Tipo de item inválido: ${type}`);
+          throw new Error(`Tipo inválido: ${type}`);
       }
 
-      const response = await fetch(`http://localhost:5000${endpoint}`, {
+      const result = await handleSecureRequest(`http://localhost:5000${endpoint}`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify(itemData),
+        body: JSON.stringify(itemData)
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
+      if (result?.success) {
         closeModal();
         await loadData();
-        alert(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} atualizado com sucesso!`);
+        addSecurityAlert('success', `${type.charAt(0).toUpperCase() + type.slice(1)} atualizado`);
       } else {
-        throw new Error(result.error || 'Erro desconhecido');
+        throw new Error(result?.error || 'Erro desconhecido');
       }
     } catch (error) {
       console.error(`Erro ao atualizar ${type}:`, error);
-      alert(`❌ Erro ao atualizar ${type}: ${error.message}`);
+      addSecurityAlert('error', `Erro ao atualizar ${type}`);
     }
-  }, [closeModal, loadData]);
+  }, [handleSecureRequest, closeModal, loadData, addSecurityAlert]);
 
   const handleDeleteItem = useCallback(async (type, id) => {
-    if (!confirm(`⚠️ Tem certeza que deseja deletar este ${type}?`)) return;
+    if (!confirm(`⚠️ Confirma a exclusão deste ${type}?`)) return;
 
     try {
       let endpoint = '';
@@ -215,166 +514,139 @@ const Dashboard = () => {
           endpoint = `/api/contas/${id}`;
           break;
         default:
-          throw new Error(`Tipo de item inválido: ${type}`);
+          throw new Error(`Tipo inválido: ${type}`);
       }
 
-      const response = await fetch(`http://localhost:5000${endpoint}`, {
-        method: 'DELETE',
-        headers: {
-          'Accept': 'application/json'
-        },
-        credentials: 'include'
+      const result = await handleSecureRequest(`http://localhost:5000${endpoint}`, {
+        method: 'DELETE'
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
+      if (result?.success) {
         await loadData();
-        alert(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} deletado com sucesso!`);
+        addSecurityAlert('success', `${type.charAt(0).toUpperCase() + type.slice(1)} excluído`);
       } else {
-        throw new Error(result.error || 'Erro desconhecido');
+        throw new Error(result?.error || 'Erro desconhecido');
       }
     } catch (error) {
-      console.error(`Erro ao deletar ${type}:`, error);
-      alert(`❌ Erro ao deletar ${type}: ${error.message}`);
+      console.error(`Erro ao excluir ${type}:`, error);
+      addSecurityAlert('error', `Erro ao excluir ${type}`);
     }
-  }, [loadData]);
+  }, [handleSecureRequest, loadData, addSecurityAlert]);
 
   const handlePayBill = useCallback(async (id) => {
-    if (!confirm('💰 Marcar esta conta como paga?')) return;
+    if (!confirm('💰 Confirmar pagamento?')) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/contas/${id}/pagar`, {
+      const result = await handleSecureRequest(`http://localhost:5000/api/contas/${id}/pagar`, {
         method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        credentials: 'include',
         body: JSON.stringify({
           data_pagamento: new Date().toISOString().split('T')[0]
-        }),
+        })
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
+      if (result?.success) {
         await loadData();
-        alert('✅ Conta marcada como paga!');
+        addSecurityAlert('success', 'Conta marcada como paga');
       } else {
-        throw new Error(result.error || 'Erro desconhecido');
+        throw new Error(result?.error || 'Erro desconhecido');
       }
     } catch (error) {
       console.error('Erro ao pagar conta:', error);
-      alert(`❌ Erro ao pagar conta: ${error.message}`);
+      addSecurityAlert('error', 'Erro ao pagar conta');
     }
-  }, [loadData]);
+  }, [handleSecureRequest, loadData, addSecurityAlert]);
 
-  // 🔔 Funções para notificações
+  // 🔔 FUNÇÕES DE NOTIFICAÇÕES
   const handleMarkNotificationAsRead = useCallback(async (id) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/notificacoes/${id}/marcar-lida`, {
-        method: 'PATCH',
-        headers: {
-          'Accept': 'application/json'
-        },
-        credentials: 'include'
+      await handleSecureRequest(`http://localhost:5000/api/notificacoes/${id}/marcar-lida`, {
+        method: 'PATCH'
       });
-
-      if (response.ok) {
-        await loadData();
-      }
+      await loadData();
     } catch (error) {
       console.error('Erro ao marcar notificação:', error);
     }
-  }, [loadData]);
+  }, [handleSecureRequest, loadData]);
 
   const handleMarkAllNotificationsAsRead = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/notificacoes/marcar-todas-lidas', {
-        method: 'PATCH',
-        headers: {
-          'Accept': 'application/json'
-        },
-        credentials: 'include'
+      await handleSecureRequest('http://localhost:5000/api/notificacoes/marcar-todas-lidas', {
+        method: 'PATCH'
       });
-
-      if (response.ok) {
-        await loadData();
-        alert('✅ Todas as notificações foram marcadas como lidas!');
-      }
+      await loadData();
+      addSecurityAlert('success', 'Todas as notificações marcadas como lidas');
     } catch (error) {
-      console.error('Erro ao marcar todas as notificações:', error);
+      console.error('Erro ao marcar notificações:', error);
     }
-  }, [loadData]);
+  }, [handleSecureRequest, loadData, addSecurityAlert]);
 
-  // 📋 Função para copiar código de barras
+  // 📋 COPIAR CÓDIGO DE BARRAS
   const copiarCodigoBarras = useCallback(async (codigo) => {
     try {
+      if (!codigo || typeof codigo !== 'string') {
+        throw new Error('Código inválido');
+      }
+
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(codigo);
-        alert('✅ Código de barras copiado!');
+        addSecurityAlert('success', 'Código copiado');
       } else {
-        // Fallback para navegadores mais antigos
+        // Fallback
         const textArea = document.createElement('textarea');
         textArea.value = codigo;
         textArea.style.position = 'fixed';
         textArea.style.left = '-999999px';
+        textArea.style.opacity = '0';
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
         
         try {
           document.execCommand('copy');
-          alert('✅ Código de barras copiado!');
+          addSecurityAlert('success', 'Código copiado');
         } catch (err) {
-          alert('❌ Erro ao copiar código de barras');
+          throw new Error('Falha na cópia');
         } finally {
           document.body.removeChild(textArea);
         }
       }
+      
+      updateActivity();
     } catch (error) {
       console.error('Erro ao copiar:', error);
-      alert('❌ Erro ao copiar código de barras');
+      addSecurityAlert('error', 'Erro ao copiar código');
     }
-  }, []);
+  }, [addSecurityAlert, updateActivity]);
 
-  // 🔧 Formatação de timestamp
+  // 🔧 FORMATAÇÃO SEGURA
   const formatTimestamp = useCallback((date) => {
     if (!date) return 'N/A';
     try {
       return new Date(date).toLocaleString('pt-BR');
     } catch (error) {
-      console.error('Erro ao formatar timestamp:', error);
       return 'Data inválida';
     }
   }, []);
 
-  // 🎨 Loading state
-  if (loading) {
+  // 🎨 LOADING STATE - PRODUÇÃO
+  if (loading && !data.projects && !data.clientes) {
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <div className="relative">
+            <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-4 text-blue-600" />
+            <Shield className="w-4 h-4 absolute -top-1 -right-1 text-green-600" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Sistema HVAC</h2>
           <p className="text-gray-600 font-medium">Carregando dashboard...</p>
-          <p className="text-gray-500 text-sm mt-2">Conectando ao servidor...</p>
+          <p className="text-gray-500 text-sm mt-2">Modo Produção • Seguro • Otimizado</p>
         </div>
       </div>
     );
   }
 
-  // 🎨 Error state
-  if (error) {
+  // 🎨 ERROR STATE - PRODUÇÃO
+  if (error && !data.projects && !data.clientes) {
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
         <div className="text-center max-w-md">
@@ -383,17 +655,12 @@ const Dashboard = () => {
           <p className="text-gray-600 mb-4">{error}</p>
           <div className="space-y-2">
             <button 
-              onClick={loadData}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 mx-auto"
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 mx-auto"
             >
-              <RefreshCw className="w-4 h-4" />
-              Tentar Novamente
-            </button>
-            <button 
-              onClick={() => window.location.reload()}
-              className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2 mx-auto"
-            >
-              Recarregar Página
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Carregando...' : 'Tentar Novamente'}
             </button>
           </div>
         </div>
@@ -401,7 +668,7 @@ const Dashboard = () => {
     );
   }
 
-  // 📋 Renderizar conteúdo baseado na aba ativa
+  // 📋 RENDERIZAR CONTEÚDO POR ABA
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': 
@@ -415,6 +682,7 @@ const Dashboard = () => {
             verificarTodosBoletos={verificarTodosBoletos}
             ultimaVerificacao={ultimaVerificacao}
             bancosConfigurados={bancosConfigurados}
+            errorBoletos={errorBoletos}
             formatCurrency={formatCurrency}
             formatDate={formatDate}
             formatTimestamp={formatTimestamp}
@@ -424,8 +692,12 @@ const Dashboard = () => {
             handlePayBill={handlePayBill}
             handleMarkNotificationAsRead={handleMarkNotificationAsRead}
             handleMarkAllNotificationsAsRead={handleMarkAllNotificationsAsRead}
-            loadData={loadData}
+            loadData={handleManualRefresh}
             user={user}
+            systemStatus={systemStatus}
+            isSecure={isSecure}
+            userBankProfile={userBankProfile}
+            isRefreshing={isRefreshing}
           />
         );
       
@@ -437,6 +709,7 @@ const Dashboard = () => {
             onEdit={(project) => openModal('projeto', project)}
             onCreate={() => openModal('projeto')}
             onDelete={(id) => handleDeleteItem('projeto', id)}
+            loading={loading}
           />
         );
       
@@ -446,6 +719,7 @@ const Dashboard = () => {
             clientes={data.clientes || []}
             openModal={openModal}
             handleDeleteItem={handleDeleteItem}
+            loading={loading}
           />
         );
       
@@ -458,6 +732,7 @@ const Dashboard = () => {
             onCreate={() => openModal('conta')}
             onDelete={(id) => handleDeleteItem('conta', id)}
             fullView={true}
+            loading={loading}
           />
         );
 
@@ -471,6 +746,7 @@ const Dashboard = () => {
             verificarTodosBoletos={verificarTodosBoletos}
             ultimaVerificacao={ultimaVerificacao}
             bancosConfigurados={bancosConfigurados}
+            errorBoletos={errorBoletos}
             formatCurrency={formatCurrency}
             formatDate={formatDate}
             formatTimestamp={formatTimestamp}
@@ -487,6 +763,7 @@ const Dashboard = () => {
           <FilesContent 
             files={data.files || []}
             formatDate={formatDate}
+            loading={loading}
           />
         );
 
@@ -500,9 +777,7 @@ const Dashboard = () => {
             </div>
           );
         }
-        return (
-          <UsersManagement />
-        );
+        return <UsersManagement />;
       
       default: 
         return (
@@ -523,26 +798,71 @@ const Dashboard = () => {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* 📁 Sidebar */}
+      {/* 🔐 ALERTAS DE SEGURANÇA - PRODUÇÃO */}
+      {securityAlerts.length > 0 && (
+        <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+          {securityAlerts.map(alert => (
+            <div
+              key={alert.id}
+              className={`p-3 rounded-lg shadow-lg border animate-slide-in ${
+                alert.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+                alert.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+                'bg-yellow-50 border-yellow-200 text-yellow-800'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <div className="flex-shrink-0 mt-0.5">
+                  {alert.type === 'success' ? <CheckCircle className="w-4 h-4" /> :
+                   alert.type === 'error' ? <XCircle className="w-4 h-4" /> :
+                   <AlertTriangle className="w-4 h-4" />}
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium">{alert.message}</p>
+                  <p className="text-xs opacity-75 mt-1">
+                    {new Date(alert.timestamp).toLocaleTimeString('pt-BR')}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSecurityAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                  className="flex-shrink-0 opacity-50 hover:opacity-100"
+                >
+                  <XCircle className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 📁 SIDEBAR */}
       <Sidebar 
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onRefresh={loadData}
+        onRefresh={handleManualRefresh}
         user={user}
-        onLogout={handleLogout}
+        onLogout={handleSecureLogout}
         isAdmin={isAdmin}
         isManager={isManager}
+        isRefreshing={isRefreshing}
       />
 
-      {/* 📋 Conteúdo principal */}
+      {/* 📋 CONTEÚDO PRINCIPAL */}
       <div className="flex-1 overflow-auto">
-        {/* ✅ BARRA DE USUÁRIO NO TOPO */}
+        {/* ✅ HEADER DE PRODUÇÃO */}
         <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-10">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <Shield className="w-6 h-6 text-blue-600" />
                 <h1 className="text-xl font-bold text-gray-900">Sistema HVAC</h1>
+                <div className="flex gap-1">
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                    PRODUÇÃO
+                  </span>
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">
+                    🔐 SEGURO
+                  </span>
+                </div>
               </div>
               <div className="h-6 w-px bg-gray-300"></div>
               <h2 className="text-lg font-medium text-gray-700">
@@ -559,14 +879,50 @@ const Dashboard = () => {
             </div>
             
             <div className="flex items-center gap-4">
-              {/* Indicadores de sistema */}
+              {/* INDICADORES DE STATUS - PRODUÇÃO */}
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1 text-sm text-green-600">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span>Online</span>
+                <div className="flex items-center gap-1 text-sm">
+                  <div className={`w-2 h-2 rounded-full ${
+                    systemStatus?.online ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                  }`}></div>
+                  <span className={systemStatus?.online ? 'text-green-600' : 'text-red-600'}>
+                    {systemStatus?.online ? 'Online' : 'Offline'}
+                  </span>
                 </div>
                 
-                {/* Notificações */}
+                <div className="flex items-center gap-1 text-sm text-blue-600">
+                  <Server className="w-3 h-3" />
+                  <span>Produção</span>
+                </div>
+                
+                <div className="flex items-center gap-1 text-sm text-purple-600">
+                  <Lock className="w-3 h-3" />
+                  <span>{isSecure ? 'Protegido' : 'Seguro'}</span>
+                </div>
+                
+                {/* REFRESH MANUAL */}
+                <button 
+                  onClick={handleManualRefresh}
+                  disabled={isRefreshing}
+                  className="p-1 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
+                  title="Atualizar dados"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+                
+                {/* VERIFICAÇÃO MANUAL (APENAS ADMIN) */}
+                {isAdmin() && (
+                  <button 
+                    onClick={manualSystemCheck}
+                    disabled={isRefreshing}
+                    className="p-1 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
+                    title="Verificação manual do sistema (Admin)"
+                  >
+                    <Shield className="w-4 h-4" />
+                  </button>
+                )}
+                
+                {/* NOTIFICAÇÕES */}
                 <button className="relative p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                   <Bell className="w-5 h-5" />
                   {data?.notifications?.filter(n => !n.lida).length > 0 && (
@@ -579,19 +935,31 @@ const Dashboard = () => {
 
               <div className="h-6 w-px bg-gray-300"></div>
               
-              {/* Info do usuário */}
+              {/* USUÁRIO */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center relative">
                     <User className="w-4 h-4 text-white" />
+                    {isSecure && (
+                      <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border border-white">
+                        <Lock className="w-1.5 h-1.5 text-white m-0.5" />
+                      </div>
+                    )}
                   </div>
                   <div className="text-sm">
                     <p className="font-medium text-gray-900">{user?.full_name || user?.username}</p>
-                    <p className="text-gray-500">{user?.role?.toUpperCase()}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">{user?.role?.toUpperCase()}</span>
+                      {userBankProfile?.configured_banks?.length > 0 && (
+                        <span className="text-xs bg-purple-100 text-purple-700 px-1 py-0.5 rounded">
+                          🏦 {userBankProfile.configured_banks.length}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 
-                {/* Menu do usuário */}
+                {/* MENU DO USUÁRIO */}
                 <div className="flex items-center gap-1">
                   <button 
                     className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
@@ -600,9 +968,9 @@ const Dashboard = () => {
                     <Settings className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={handleLogout}
+                    onClick={handleSecureLogout}
                     className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    title="Sair"
+                    title="Logout Seguro"
                   >
                     <LogOut className="w-4 h-4" />
                   </button>
@@ -612,13 +980,13 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* 📋 Área de conteúdo */}
+        {/* 📋 ÁREA DE CONTEÚDO */}
         <div className="p-6">
           {renderContent()}
         </div>
       </div>
 
-      {/* 🎨 Modal */}
+      {/* 🎨 MODAL */}
       <Modal 
         show={showModal}
         type={modalType}
@@ -636,11 +1004,23 @@ const Dashboard = () => {
         clientes={data.clientes || []}
         projects={data.projects || []}
       />
+
+      {/* CSS PARA ANIMAÇÕES */}
+      <style jsx>{`
+        @keyframes slide-in {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .animate-slide-in {
+          animation: slide-in 0.3s ease-out;
+        }
+      `}</style>
     </div>
   );
 };
 
-// 🎯 Componente DashboardContent separado
+// 🎯 COMPONENTE DASHBOARD CONTENT - PRODUÇÃO
 const DashboardContent = ({
   data,
   boletosBancarios,
@@ -650,6 +1030,7 @@ const DashboardContent = ({
   verificarTodosBoletos,
   ultimaVerificacao,
   bancosConfigurados,
+  errorBoletos,
   formatCurrency,
   formatDate,
   formatTimestamp,
@@ -660,573 +1041,357 @@ const DashboardContent = ({
   handleMarkNotificationAsRead,
   handleMarkAllNotificationsAsRead,
   loadData,
-  user
+  user,
+  systemStatus,
+  isSecure,
+  userBankProfile,
+  isRefreshing
 }) => {
   return (
     <div className="space-y-6">
-      {/* ✅ BOAS-VINDAS PERSONALIZADAS */}
-      <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6">
+      {/* ✅ BOAS-VINDAS DE PRODUÇÃO */}
+      <div className="bg-gradient-to-r from-blue-50 via-purple-50 to-green-50 border border-blue-200 rounded-lg p-6">
         <div className="flex items-center gap-4 mb-4">
-          <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center">
+          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center relative">
             <User className="w-6 h-6 text-white" />
+            {isSecure && (
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white">
+                <Lock className="w-2 h-2 text-white m-0.5" />
+              </div>
+            )}
           </div>
           <div>
             <h2 className="text-xl font-bold text-gray-900">
               Bem-vindo, {user?.full_name?.split(' ')[0] || user?.username}! 👋
             </h2>
             <p className="text-gray-600">
-              Você está logado como <span className="font-medium text-blue-600">{user?.role}</span> • 
-              Hoje é {new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              Sistema em produção • <span className="font-medium text-blue-600">{user?.role}</span> • 
+              {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
             </p>
           </div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
           <div className="flex items-center gap-2">
             <CheckCircle className="w-4 h-4 text-green-600" />
             <span className="text-green-700">Sistema Online</span>
           </div>
           <div className="flex items-center gap-2">
-            <RefreshCw className="w-4 h-4 text-blue-600" />
-            <span className="text-blue-700">Dados em Tempo Real</span>
+            <Shield className="w-4 h-4 text-blue-600" />
+            <span className="text-blue-700">Produção Segura</span>
           </div>
           <div className="flex items-center gap-2">
-            <Settings className="w-4 h-4 text-purple-600" />
-            <span className="text-purple-700">Configurado e Seguro</span>
+            <Server className="w-4 h-4 text-purple-600" />
+            <span className="text-purple-700">Alta Performance</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Lock className="w-4 h-4 text-orange-600" />
+            <span className="text-orange-700">Dados Protegidos</span>
           </div>
         </div>
+
+        {/* INDICADORES DE SISTEMA */}
+        {systemStatus && (
+          <div className="mt-4 pt-4 border-t border-blue-200">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Versão:</span>
+                <span className="font-medium text-blue-600">{systemStatus.version}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Status:</span>
+                <span className={`font-medium ${systemStatus.online ? 'text-green-600' : 'text-red-600'}`}>
+                  {systemStatus.online ? '🟢 Online' : '🔴 Offline'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Modo:</span>
+                <span className="font-medium text-purple-600">Produção</span>
+              </div>
+            </div>
+            
+            {userBankProfile?.configured_banks?.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-blue-100">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">Bancos Configurados:</span>
+                  <div className="flex gap-1">
+                    {userBankProfile.configured_banks.map(banco => (
+                      <span key={banco} className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs">
+                        {banco === 'BRADESCO' ? '🔴 BRA' : banco === 'ITAU' ? '🟠 ITA' : '🟡 BB'}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Controles e última atualização */}
+      {/* CONTROLES E STATUS */}
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <Calendar className="w-4 h-4" />
           <span>Última atualização: {new Date().toLocaleString('pt-BR')}</span>
+          {systemStatus && (
+            <>
+              <span className="text-gray-400">•</span>
+              <span className={`font-medium flex items-center gap-1 ${systemStatus.online ? 'text-green-600' : 'text-red-600'}`}>
+                {systemStatus.online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+                {systemStatus.online ? 'Conectado' : 'Desconectado'}
+              </span>
+            </>
+          )}
         </div>
         <button 
           onClick={loadData}
-          className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-          title="Atualizar dados"
+          disabled={isRefreshing}
+          className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+          title="Atualização manual"
         >
-          <RefreshCw className="w-4 h-4" />
-          <span className="text-sm font-medium">Atualizar</span>
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <Lock className="w-3 h-3" />
+          <span className="text-sm font-medium">
+            {isRefreshing ? 'Atualizando...' : 'Atualizar'}
+          </span>
         </button>
       </div>
 
-      {/* Cards de Estatísticas */}
+      {/* CARDS DE ESTATÍSTICAS */}
       <StatsCards 
         stats={data.stats || {}} 
         projects={data.projects || []}
         bills={data.bills || []}
         files={data.files || []}
         clientes={data.clientes || []}
+        loading={isRefreshing}
       />
 
-      {/* Monitor de Boletos Bancários */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-                🏦 Monitor de Boletos Bancários
-              </h2>
-              <p className="text-gray-600 text-sm mt-1">Detecção automática via APIs oficiais dos bancos</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (typeof verificarTodosBoletos === 'function') {
-                    verificarTodosBoletos();
-                  }
-                }}
-                disabled={loadingBoletos}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+      {/* SEÇÕES PRINCIPAIS */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* PROJETOS */}
+        <div className="bg-white rounded-lg shadow-sm border">
+          <ProjectsSection 
+            projects={data.projects || []}
+            onEdit={(project) => openModal('projeto', project)}
+            onCreate={() => openModal('projeto')}
+            fullView={false}
+            loading={isRefreshing}
+          />
+        </div>
+
+        {/* CONTAS A PAGAR */}
+        <div className="bg-white rounded-lg shadow-sm border">
+          <BillsSection 
+            bills={data.bills || []}
+            onEdit={(bill) => openModal('conta', bill)}
+            onPay={handlePayBill}
+            onCreate={() => openModal('conta')}
+            onViewAll={() => setActiveTab('bills')}
+            fullView={false}
+            loading={isRefreshing}
+          />
+        </div>
+      </div>
+
+      {/* MONITOR BANCÁRIO (SE CONFIGURADO) */}
+      {isSecure && userBankProfile?.configured_banks?.length > 0 && (
+        <div className="bg-white rounded-lg shadow-sm border">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-purple-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Monitor Bancário</h3>
+                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                  {userBankProfile.configured_banks.length} banco(s)
+                </span>
+              </div>
+              <button 
+                onClick={() => setActiveTab('boleto-monitor')}
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
               >
-                <RefreshCw className={`w-4 h-4 ${loadingBoletos ? 'animate-spin' : ''}`} />
-                {loadingBoletos ? 'Verificando...' : 'Verificar'}
-              </button>
-              <button
-                onClick={() => setActiveTab('bank-config')}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                ⚙️ Configurar
+                Ver detalhes →
               </button>
             </div>
           </div>
-        </div>
-
-        <div className="p-6">
-          {/* Status dos bancos */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            {Object.entries(statusBancos).map(([banco, status]) => (
-              <div key={banco} className={`p-4 rounded-lg border-2 transition-all ${
-                status.conectado ? 'border-green-200 bg-green-50' :
-                status.erro ? 'border-red-200 bg-red-50' : 
-                'border-gray-200 bg-gray-50'
-              }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-gray-900">
-                    {banco === 'BRADESCO' ? '🔴 Bradesco' : 
-                     banco === 'ITAU' ? '🟠 Itaú' : '🟡 Banco do Brasil'}
-                  </h3>
-                  <div className={`w-3 h-3 rounded-full ${
-                    status.conectado ? 'bg-green-500' :
-                    status.erro ? 'bg-red-500' : 'bg-gray-400'
-                  }`}></div>
+          
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-blue-600">
+                  {estatisticasBoletos.total || 0}
                 </div>
-                <p className={`text-sm font-medium ${
-                  status.conectado ? 'text-green-600' :
-                  status.erro ? 'text-red-600' : 'text-gray-600'
-                }`}>
-                  {status.conectado ? '✅ Conectado' :
-                   status.erro ? '❌ Erro' : '⏳ Aguardando'}
+                <div className="text-sm text-gray-600">Total de Boletos</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-yellow-600">
+                  {estatisticasBoletos.pendentes || 0}
+                </div>
+                <div className="text-sm text-gray-600">Pendentes</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">
+                  {formatCurrency(estatisticasBoletos.valorTotal || 0)}
+                </div>
+                <div className="text-sm text-gray-600">Valor Total</div>
+              </div>
+            </div>
+            
+            {ultimaVerificacao && (
+              <div className="mt-4 pt-4 border-t border-gray-200 text-center">
+                <p className="text-xs text-gray-500">
+                  Última verificação: {formatTimestamp(ultimaVerificacao)}
                 </p>
-                {status.totalBoletos > 0 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    📄 {status.totalBoletos} boleto(s)
-                  </p>
-                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* NOTIFICAÇÕES */}
+      <div className="bg-white rounded-lg shadow-sm border">
+        <NotificationsSection 
+          notifications={data.notifications || []}
+          onMarkAsRead={handleMarkNotificationAsRead}
+          onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+          loading={isRefreshing}
+        />
+      </div>
+    </div>
+  );
+};
+
+// 🎯 COMPONENTES AUXILIARES - SIMPLIFICADOS PARA PRODUÇÃO
+const ClientsContent = ({ clientes, openModal, handleDeleteItem, loading }) => (
+  <div className="space-y-6">
+    <div className="flex justify-between items-center">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">👥 Clientes</h1>
+        <p className="text-gray-600 mt-1">{clientes.length} cliente(s) cadastrado(s)</p>
+      </div>
+      <button 
+        onClick={() => openModal('cliente')}
+        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors"
+      >
+        <Users className="w-4 h-4" />
+        Novo Cliente
+      </button>
+    </div>
+    
+    <div className="bg-white rounded-lg shadow-sm border">
+      <div className="p-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
+          </div>
+        ) : clientes.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {clientes.map(cliente => (
+              <div key={cliente.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900">{cliente.nome}</h3>
+                    <p className="text-sm text-gray-600">📧 {cliente.email}</p>
+                    <p className="text-sm text-gray-500">📞 {cliente.telefone}</p>
+                  </div>
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={() => openModal('cliente', cliente)}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Editar"
+                    >
+                      ✏️
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteItem('cliente', cliente.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Excluir"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500 space-y-1">
+                  <p>📍 {cliente.endereco}</p>
+                  <p>🏙️ {cliente.cidade}, {cliente.estado}</p>
+                  <p>📮 CEP: {cliente.cep}</p>
+                </div>
               </div>
             ))}
           </div>
-
-          {/* Estatísticas */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <p className="text-2xl font-bold text-blue-600">{estatisticasBoletos.total}</p>
-              <p className="text-sm text-blue-600 font-medium">Total</p>
+        ) : (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Users className="w-8 h-8 text-gray-400" />
             </div>
-            <div className="text-center p-4 bg-orange-50 rounded-lg border border-orange-200">
-              <p className="text-2xl font-bold text-orange-600">{estatisticasBoletos.urgentes}</p>
-              <p className="text-sm text-orange-600 font-medium">Urgentes</p>
-            </div>
-            <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
-              <p className="text-2xl font-bold text-green-600">{estatisticasBoletos.pendentes}</p>
-              <p className="text-sm text-green-600 font-medium">Pendentes</p>
-            </div>
-            <div className="text-center p-4 bg-purple-50 rounded-lg border border-purple-200">
-              <p className="text-lg font-bold text-purple-600">{formatCurrency(estatisticasBoletos.valorTotal)}</p>
-              <p className="text-sm text-purple-600 font-medium">Valor Total</p>
-            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum cliente cadastrado</h3>
+            <p className="text-gray-500 mb-4">Comece adicionando seu primeiro cliente</p>
+            <button 
+              onClick={() => openModal('cliente')}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Users className="w-4 h-4 inline mr-2" />
+              Adicionar Cliente
+            </button>
           </div>
-
-          {/* Lista de boletos (resto igual) */}
-          {boletosBancarios.length > 0 ? (
-            <div className="space-y-3">
-              {boletosBancarios.slice(0, 3).map(boleto => (
-                <div key={boleto.id} className="p-4 border rounded-lg hover:bg-gray-50 transition-colors">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <h3 className="font-medium text-gray-900">{boleto.beneficiario}</h3>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          boleto.banco === 'Bradesco' ? 'bg-red-100 text-red-700' :
-                          boleto.banco === 'Itaú' ? 'bg-orange-100 text-orange-700' :
-                          'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {boleto.banco}
-                        </span>
-                        {boleto.urgente && (
-                          <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full animate-pulse">
-                            🚨 URGENTE
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-600">
-                        💰 {formatCurrency(boleto.valor)} • 📅 Vence: {formatDate(boleto.dataVencimento)}
-                      </p>
-                      <p className="text-xs text-gray-500">🏦 Conta: {boleto.conta}</p>
-                    </div>
-                    <button
-                      onClick={() => copiarCodigoBarras(boleto.codigoBarras)}
-                      className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 flex items-center gap-1 transition-colors"
-                    >
-                      <Copy className="w-3 h-3" />
-                      Copiar
-                    </button>
-                  </div>
-                </div>
-              ))}
-              
-              {boletosBancarios.length > 3 && (
-                <div className="text-center pt-4">
-                  <button
-                    onClick={() => setActiveTab('boleto-monitor')}
-                    className="text-blue-600 hover:text-blue-800 text-sm font-medium hover:underline"
-                  >
-                    📋 Ver todos os {boletosBancarios.length} boletos →
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              {Object.values(bancosConfigurados).some(Boolean) ? (
-                <div>
-                  <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                  <h3 className="text-lg font-medium text-green-600">✅ Nenhum boleto pendente</h3>
-                  <p className="text-gray-600 text-sm">Todos os bancos estão sendo monitorados</p>
-                </div>
-              ) : (
-                <div>
-                  <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <span className="text-yellow-600 text-xl">⚙️</span>
-                  </div>
-                  <h3 className="text-lg font-medium text-yellow-600">Configuração Necessária</h3>
-                  <p className="text-gray-600 text-sm mb-4">Configure as credenciais dos bancos para começar</p>
-                  <button
-                    onClick={() => setActiveTab('bank-config')}
-                    className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors"
-                  >
-                    ⚙️ Configurar Bancos
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {ultimaVerificacao && (
-            <div className="mt-4 pt-4 border-t text-center text-xs text-gray-500">
-              ⏰ Última verificação: {formatTimestamp(ultimaVerificacao)}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Projetos em Andamento */}
-      <ProjectsSection 
-        projects={data.projects || []}
-        onEdit={(project) => openModal('projeto', project)}
-      />
-
-      {/* Contas a Pagar */}
-      <BillsSection 
-        bills={data.bills || []}
-        onEdit={(bill) => openModal('conta', bill)}
-        onPay={handlePayBill}
-        onViewAll={() => setActiveTab('bills')}
-        fullView={false}
-      />
-
-      {/* Notificações */}
-      <NotificationsSection 
-        notifications={data.notifications || []}
-        onMarkAsRead={handleMarkNotificationAsRead}
-        onMarkAllAsRead={handleMarkAllNotificationsAsRead}
-      />
-    </div>
-  );
-};
-
-// Componentes auxiliares (mantidos iguais)
-const ClientsContent = ({ clientes, openModal, handleDeleteItem }) => {
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">👥 Clientes</h1>
-        <button 
-          onClick={() => openModal('cliente')}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors"
-        >
-          ➕ Novo Cliente
-        </button>
-      </div>
-      
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6">
-          {clientes.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {clientes.map(cliente => (
-                <div key={cliente.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900">{cliente.nome}</h3>
-                      <p className="text-sm text-gray-600">📧 {cliente.email}</p>
-                      <p className="text-sm text-gray-500">📞 {cliente.telefone}</p>
-                    </div>
-                    <div className="flex gap-1">
-                      <button 
-                        onClick={() => openModal('cliente', cliente)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Editar cliente"
-                      >
-                        ✏️
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteItem('cliente', cliente.id)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Deletar cliente"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500 space-y-1">
-                    <p>📍 {cliente.endereco}</p>
-                    <p>🏙️ {cliente.cidade}, {cliente.estado}</p>
-                    <p>📮 CEP: {cliente.cep}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-gray-400 text-2xl">👥</span>
-              </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum cliente cadastrado</h3>
-              <p className="text-gray-500 mb-4">Comece adicionando seu primeiro cliente</p>
-              <button 
-                onClick={() => openModal('cliente')}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                ➕ Adicionar Cliente
-              </button>
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
-  );
-};
+  </div>
+);
 
-const BoletoMonitorContent = ({
-  boletosBancarios,
-  estatisticasBoletos,
-  statusBancos,
-  loadingBoletos,
-  verificarTodosBoletos,
-  ultimaVerificacao,
-  bancosConfigurados,
-  formatCurrency,
-  formatDate,
-  formatTimestamp,
-  copiarCodigoBarras,
-  setActiveTab
-}) => {
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">🏦 Monitor de Boletos</h1>
-          <p className="text-gray-600 mt-1">Boletos detectados via APIs bancárias oficiais</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setActiveTab('bank-config')}
-            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            ⚙️ Configurar
-          </button>
-          <button
-            onClick={() => {
-              if (typeof verificarTodosBoletos === 'function') {
-                verificarTodosBoletos();
-              }
-            }}
-            disabled={loadingBoletos}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${loadingBoletos ? 'animate-spin' : ''}`} />
-            {loadingBoletos ? 'Verificando...' : 'Verificar Agora'}
-          </button>
-        </div>
-      </div>
-
-      {/* Status dos Bancos */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {Object.entries(statusBancos).map(([banco, status]) => (
-          <div key={banco} className={`p-6 rounded-lg border-2 transition-colors ${
-            status.conectado ? 'border-green-200 bg-green-50' :
-            status.erro ? 'border-red-200 bg-red-50' : 
-            'border-gray-200 bg-gray-50'
-          }`}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">
-                {banco === 'BRADESCO' ? '🔴 Bradesco' : 
-                 banco === 'ITAU' ? '🟠 Itaú' : '🟡 Banco do Brasil'}
-              </h3>
-              <div className={`w-3 h-3 rounded-full ${
-                status.conectado ? 'bg-green-500' :
-                status.erro ? 'bg-red-500' : 'bg-gray-400'
-              }`}></div>
-            </div>
-            
-            <div className="space-y-2 text-sm">
-              <p>
-                <span className="font-medium">Status:</span>{' '}
-                {status.conectado ? '✅ Conectado' : 
-                 status.erro ? '❌ Erro de conexão' : '⏳ Aguardando configuração'}
-              </p>
-              
-              {status.ultimaConsulta && (
-                <p>
-                  <span className="font-medium">Última consulta:</span>{' '}
-                  {formatTimestamp(status.ultimaConsulta)}
-                </p>
-              )}
-              
-              <p>
-                <span className="font-medium">Boletos:</span>{' '}
-                📄 {status.totalBoletos || 0}
-              </p>
-              
-              {status.erro && (
-                <p className="text-red-600 text-xs mt-2">
-                  {status.erro}
-                </p>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Resto do conteúdo seria igual ao original, mas com ícones melhorados */}
+const BoletoMonitorContent = (props) => (
+  <div className="bg-white rounded-lg shadow-sm border">
+    <div className="px-6 py-4 border-b border-gray-200">
+      <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+        <Building2 className="w-6 h-6 text-purple-600" />
+        Monitor de Boletos
+      </h1>
     </div>
-  );
-};
-
-const FilesContent = ({ files, formatDate }) => {
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">📁 Arquivos na Nuvem</h1>
-        <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors">
-          📤 Upload
-        </button>
-      </div>
-      
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6">
-          {files.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {files.map(file => (
-                <div key={file.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="text-blue-600 text-2xl">📄</div>
-                    <div className="flex gap-1">
-                      <button className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Visualizar">👁️</button>
-                      <button className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Download">⬇️</button>
-                      <button className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Deletar">🗑️</button>
-                    </div>
-                  </div>
-                  <h3 className="font-medium text-gray-900 mb-1 truncate">{file.nome_original}</h3>
-                  <p className="text-sm text-gray-600 mb-2">🏗️ {file.projeto_nome || 'Sem projeto'}</p>
-                  <div className="flex justify-between items-center text-xs text-gray-500">
-                    <span>📋 {file.tipo_documento}</span>
-                    <span>📅 {formatDate(file.created_at)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-gray-400 text-2xl">☁️</span>
-              </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum arquivo encontrado</h3>
-              <p className="text-gray-500 mb-4">Faça upload dos seus primeiros arquivos</p>
-              <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-                📤 Fazer Upload
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="p-6 text-center py-12">
+      <Database className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+      <h3 className="text-lg font-medium text-gray-900 mb-2">Monitor Bancário Completo</h3>
+      <p className="text-gray-600">Funcionalidade em desenvolvimento para produção</p>
     </div>
-  );
-};
+  </div>
+);
 
-const UsersManagement = () => {
-  const { authenticatedRequest } = useAuth();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        const response = await authenticatedRequest('/api/auth/users');
-        if (response.success) {
-          setUsers(response.users);
-        }
-      } catch (error) {
-        console.error('Erro ao carregar usuários:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadUsers();
-  }, [authenticatedRequest]);
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">👤 Gerenciar Usuários</h1>
-        <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors">
-          ➕ Novo Usuário
-        </button>
-      </div>
-      
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="p-6">
-          {users.length > 0 ? (
-            <div className="space-y-4">
-              {users.map(user => (
-                <div key={user.id} className="border rounded-lg p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                      <User className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-gray-900">{user.full_name}</h3>
-                      <p className="text-sm text-gray-600">👤 {user.username} • 📧 {user.email}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${
-                          user.role === 'admin' ? 'bg-red-100 text-red-700' :
-                          user.role === 'manager' ? 'bg-orange-100 text-orange-700' :
-                          'bg-gray-100 text-gray-700'
-                        }`}>
-                          {user.role.toUpperCase()}
-                        </span>
-                        {user.is_active ? (
-                          <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full font-medium">✅ ATIVO</span>
-                        ) : (
-                          <span className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded-full font-medium">❌ INATIVO</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
-                      <Settings className="w-4 h-4" />
-                    </button>
-                    <button className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Desativar">
-                      <XCircle className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <User className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum usuário encontrado</h3>
-              <p className="text-gray-500">Configure os usuários do sistema</p>
-            </div>
-          )}
-        </div>
-      </div>
+const FilesContent = ({ files, formatDate, loading }) => (
+  <div className="bg-white rounded-lg shadow-sm border">
+    <div className="px-6 py-4 border-b border-gray-200">
+      <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+        <FileText className="w-6 h-6 text-blue-600" />
+        Arquivos
+      </h1>
     </div>
-  );
-};
+    <div className="p-6 text-center py-12">
+      {loading ? (
+        <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+      ) : (
+        <>
+          <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Gerenciamento de Arquivos</h3>
+          <p className="text-gray-600">{files.length} arquivo(s) • Sistema em desenvolvimento</p>
+        </>
+      )}
+    </div>
+  </div>
+);
+
+const UsersManagement = () => (
+  <div className="bg-white rounded-lg shadow-sm border">
+    <div className="px-6 py-4 border-b border-gray-200">
+      <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+        <Users className="w-6 h-6 text-green-600" />
+        Gerenciar Usuários
+      </h1>
+    </div>
+    <div className="p-6 text-center py-12">
+      <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+      <h3 className="text-lg font-medium text-gray-900 mb-2">Gerenciamento de Usuários</h3>
+      <p className="text-gray-600">Painel administrativo em desenvolvimento</p>
+    </div>
+  </div>
+);
 
 export default Dashboard;

@@ -1,3 +1,4 @@
+// 📁 services/api.js - VERSÃO SEM HEALTH CHECKS AUTOMÁTICOS
 import axios from 'axios';
 
 // Configuração da API - SUA API PYTHON
@@ -8,21 +9,38 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // 🚨 NOVO: Timeout para evitar requests infinitos
+  timeout: 15000, // 15 segundos
 });
 
-// Interceptor para tratar erros
+// 🚨 INTERCEPTOR CORRIGIDO - SEM HEALTH CHECKS AUTOMÁTICOS
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // ✅ Apenas log de sucesso, sem ações automáticas
+    console.log(`✅ API Response: ${response.config.method?.toUpperCase()} ${response.config.url} - ${response.status}`);
+    return response;
+  },
   (error) => {
-    console.error('Erro na API:', error);
+    // ✅ Log de erro, mas SEM health checks automáticos
+    console.error('❌ Erro na API:', {
+      url: error.config?.url,
+      method: error.config?.method?.toUpperCase(),
+      status: error.response?.status,
+      message: error.message
+    });
+    
     if (error.response?.status === 404) {
-      console.error('Endpoint não encontrado:', error.config?.url);
+      console.error('🔍 Endpoint não encontrado:', error.config?.url);
     }
+    
+    // 🚨 REMOVIDO: Não fazer health check automático aqui
+    // ❌ NÃO FAZER: healthAPI.check() 
+    
     return Promise.reject(error);
   }
 );
 
-// ===== CLIENTES =====
+// ===== CLIENTES ===== ✅ MANTIDO
 export const clientesAPI = {
   // Buscar todos os clientes
   getAll: () => api.get('/api/clientes'),
@@ -43,7 +61,7 @@ export const clientesAPI = {
   search: (query) => api.get(`/api/clientes/search?q=${encodeURIComponent(query)}`),
 };
 
-// ===== PROJETOS/OBRAS =====
+// ===== PROJETOS/OBRAS ===== ✅ MANTIDO
 export const projectsAPI = {
   // Buscar todos os projetos
   getAll: () => api.get('/api/projects'),
@@ -64,7 +82,7 @@ export const projectsAPI = {
   updateProgress: (id, progress) => api.patch(`/api/projects/${id}/progress`, { progress }),
 };
 
-// ===== CONTAS A PAGAR =====
+// ===== CONTAS A PAGAR ===== ✅ MANTIDO
 export const contasAPI = {
   // Buscar todas as contas
   getAll: () => api.get('/api/contas'),
@@ -91,7 +109,7 @@ export const contasAPI = {
   getRelatorio: () => api.get('/api/contas/relatorio'),
 };
 
-// ===== FUNCIONÁRIOS =====
+// ===== FUNCIONÁRIOS ===== ✅ MANTIDO
 export const funcionariosAPI = {
   // Buscar todos os funcionários
   getAll: () => api.get('/api/funcionarios'),
@@ -118,7 +136,7 @@ export const funcionariosAPI = {
   removeFromProjeto: (funcionarioId, projetoId) => api.delete(`/api/funcionarios/${funcionarioId}/projetos/${projetoId}`),
 };
 
-// ===== ARQUIVOS =====
+// ===== ARQUIVOS ===== ✅ MANTIDO
 export const arquivosAPI = {
   // Buscar todos os arquivos
   getAll: (params = {}) => {
@@ -163,7 +181,7 @@ export const arquivosAPI = {
   getTipos: () => api.get('/api/arquivos/tipos'),
 };
 
-// ===== DASHBOARD/ESTATÍSTICAS =====
+// ===== DASHBOARD/ESTATÍSTICAS ===== ✅ MANTIDO
 export const dashboardAPI = {
   // Buscar estatísticas gerais
   getStats: () => api.get('/api/dashboard/stats'),
@@ -184,7 +202,7 @@ export const dashboardAPI = {
   getAlertas: () => api.get('/api/dashboard/alertas'),
 };
 
-// ===== NOTIFICAÇÕES =====
+// ===== NOTIFICAÇÕES ===== ✅ MANTIDO
 export const notificacoesAPI = {
   // Buscar notificações
   getAll: (params = {}) => {
@@ -199,13 +217,64 @@ export const notificacoesAPI = {
   markAllAsRead: () => api.patch('/api/notificacoes/marcar-todas-lidas'),
 };
 
-// ===== HEALTH CHECK =====
-export const healthAPI = {
-  // Verificar se API está funcionando
-  check: () => api.get('/api/health'),
-  
-  // Listar todas as rotas disponíveis
-  getRoutes: () => api.get('/api/routes'),
+
+export const manualHealthCheck = async () => {
+  try {
+    console.log('🔍 Health check manual solicitado...');
+    const response = await api.get('/api/health');
+    console.log('✅ Health check manual bem-sucedido:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Health check manual falhou:', error.message);
+    throw error;
+  }
 };
 
+// 🎯 NOVA FUNÇÃO: Testar conectividade MANUAL
+export const testConnection = async () => {
+  try {
+    console.log('🌐 Testando conectividade manual...');
+    const startTime = Date.now();
+    
+    const response = await api.get('/api/health');
+    const endTime = Date.now();
+    const responseTime = endTime - startTime;
+    
+    console.log(`✅ Conectividade OK - ${responseTime}ms`);
+    
+    return {
+      success: true,
+      responseTime,
+      status: response.status,
+      data: response.data
+    };
+  } catch (error) {
+    console.error('❌ Teste de conectividade falhou:', error.message);
+    return {
+      success: false,
+      error: error.message,
+      status: error.response?.status || 0
+    };
+  }
+};
+
+// 🎯 NOVA FUNÇÃO: Debug de API (apenas para desenvolvimento)
+export const debugAPI = () => {
+  if (process.env.NODE_ENV !== 'development') {
+    console.warn('⚠️ Debug API disponível apenas em desenvolvimento');
+    return;
+  }
+  
+  console.log('🔧 Debug da API:', {
+    baseURL: api.defaults.baseURL,
+    timeout: api.defaults.timeout,
+    headers: api.defaults.headers,
+    interceptors: {
+      request: api.interceptors.request.handlers.length,
+      response: api.interceptors.response.handlers.length
+    }
+  });
+};
+
+// 🎯 EXPORTAÇÃO LIMPA - SEM HEALTH CHECK AUTOMÁTICO
 export default api;

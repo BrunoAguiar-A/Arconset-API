@@ -1,4 +1,4 @@
-// 📁 src/components/Dashboard/components/Sidebar.jsx - SIDEBAR CORRIGIDA
+// 📁 src/components/Dashboard/components/Sidebar.jsx - SIDEBAR COM ACESSO LIBERADO
 import React from 'react';
 import { 
   LayoutDashboard,
@@ -27,7 +27,7 @@ const Sidebar = ({
   isManager 
 }) => {
   
-  // 📋 Configuração dos itens do menu
+  // 📋 Configuração dos itens do menu - ACESSO LIBERADO
   const menuItems = [
     {
       id: 'dashboard',
@@ -67,12 +67,14 @@ const Sidebar = ({
       badge: '🤖'
     },
     {
+      // 🚨 ALTERAÇÃO PRINCIPAL: ACESSO LIBERADO!
       id: 'bank-config',
       label: 'Config. Bancos',
       icon: Settings,
       description: 'APIs Bradesco, Itaú, BB',
       color: 'yellow',
-      requiresRole: ['admin', 'manager']
+      // ❌ REMOVIDO: requiresRole: ['admin', 'manager']
+      // ✅ AGORA: Todos os usuários podem acessar
     },
     {
       id: 'files',
@@ -83,7 +85,7 @@ const Sidebar = ({
     }
   ];
 
-  // Adicionar item de usuários apenas para admin
+  // Adicionar item de usuários apenas para admin (mantido)
   if (isAdmin && isAdmin()) {
     menuItems.push({
       id: 'users',
@@ -91,22 +93,27 @@ const Sidebar = ({
       icon: UserCog,
       description: 'Gerenciar usuários',
       color: 'red',
-      requiresRole: ['admin'],
+      requiresRole: ['admin'], // Usuários ainda restritos apenas para admin
       badge: '👥'
     });
   }
 
-  // 🔧 Verificar se usuário tem acesso ao item
+  // 🔧 Verificar se usuário tem acesso ao item - FUNÇÃO CORRIGIDA
   const hasAccess = (item) => {
+    // ✅ Se não tem requiresRole, todos podem acessar
     if (!item.requiresRole) return true;
     
+    // ✅ Admin sempre tem acesso
     if (isAdmin && isAdmin()) return true;
+    
+    // ✅ Manager tem acesso se estiver na lista
     if (isManager && isManager() && item.requiresRole.includes('manager')) return true;
     
+    // ❌ Bloquear apenas itens com requiresRole definido
     return false;
   };
 
-  // 🎨 Obter classes de cor baseadas no estado
+  // 🎨 Obter classes de cor baseadas no estado - MANTIDO
   const getItemClasses = (item) => {
     const isActive = activeTab === item.id;
     const hasAccessToItem = hasAccess(item);
@@ -122,7 +129,7 @@ const Sidebar = ({
     return `flex items-center gap-3 w-full p-3 text-gray-700 hover:text-${item.color}-600 hover:bg-${item.color}-50 transition-all duration-200 hover:border-r-3 hover:border-${item.color}-300`;
   };
 
-  // 🔧 Lidar com clique no item
+  // 🔧 Lidar com clique no item - MANTIDO
   const handleItemClick = (item) => {
     if (!hasAccess(item)) {
       alert(`🚫 Acesso negado!\n\nVocê precisa ser ${item.requiresRole.join(' ou ')} para acessar esta funcionalidade.`);
@@ -196,7 +203,7 @@ const Sidebar = ({
                     <span className="text-xs">{item.badge}</span>
                   )}
                   
-                  {/* Indicador de acesso restrito */}
+                  {/* ✅ REMOVIDO: Indicador de acesso restrito para Config. Bancos */}
                   {!hasAccessToItem && (
                     <div className="text-gray-400">🔒</div>
                   )}
@@ -207,8 +214,8 @@ const Sidebar = ({
                   )}
                 </button>
                 
-                {/* Tooltip para acesso restrito */}
-                {!hasAccessToItem && (
+                {/* Tooltip apenas para itens realmente restritos */}
+                {!hasAccessToItem && item.requiresRole && (
                   <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                     Requer: {item.requiresRole.join(' ou ')}
                   </div>

@@ -1,5 +1,6 @@
 // 📁 src/components/Dashboard/components/ProjectsSection.jsx
 import React from 'react';
+import { formatCurrency, formatDate, PROJECT_STATUS_COLORS } from '../utils';
 import { 
   FolderOpen, 
   MapPin, 
@@ -17,19 +18,6 @@ const ProjectsSection = ({
   onCreate, 
   onDelete 
 }) => {
-  // 🔧 Formatação de moeda
-  const formatCurrency = (value) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(value || 0);
-  };
-
-  // 🔧 Formatação de data
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('pt-BR');
-  };
 
   const getStatusColor = (status) => {
     switch (status) {
