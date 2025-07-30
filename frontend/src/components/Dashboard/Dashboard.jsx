@@ -1,65 +1,63 @@
-// 📁 src/components/Dashboard/Dashboard.jsx - VERSÃO DE PRODUÇÃO SEM HEALTH CHECKS AUTOMÁTICOS
+// 📁 src/components/Dashboard/Dashboard.jsx - VERSÃO REFATORADA E ORGANIZADA
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+
 import { 
   RefreshCw, 
   XCircle, 
   CheckCircle, 
   AlertTriangle, 
-  Copy, 
   LogOut, 
   User, 
   Settings,
   Shield,
   Bell,
-  Calendar,
-  Activity,
+  Server,
   Lock,
-  BarChart3,
   Building2,
-  CreditCard,
-  FileText,
   Users,
   Database,
-  Server,
-  Wifi,
-  WifiOff
+  FileText
 } from 'lucide-react';
 
-// 📋 Componentes
-import StatsCards from './components/StatsCards';
+// 📋 COMPONENTES ORGANIZADOS
+import DashboardContent from './components/DashboardContent';
+import ClientsContent from './components/ClientsContent.jsx';
 import ProjectsSection from './components/ProjectsSection';
 import BillsSection from './components/BillsSection';
-import NotificationsSection from './components/NotificationsSection';
 import Sidebar from './components/Sidebar';
 import Modal from './components/Modal';
+import FilesSection from './components/FilesSection';
+// ✅ ALTERAÇÃO: Mudando de NotificationsSection para NotificationsDropdown
+import NotificationsDropdown from './components/NotificationsDropdown';
+import SettingsModal from './components/SettingsModal';
 import SecureBankConfigPage from './pages/SecureBankConfigPage';
 
-// 🔧 Hooks OTIMIZADOS
+// 🔧 HOOKS OTIMIZADOS
 import { useSecureBankMonitor } from './hooks/useSecureBankMonitor';
 import { useDashboardData } from './hooks/useDashboardData';
 import { useModal } from './hooks/useModal';
 import { useAuth } from './hooks/useAuth'; 
 
-// 🎯 Utilitários centralizados
+// 🎯 UTILITÁRIOS CENTRALIZADOS
 import { formatCurrency, formatDate } from './utils';
 
-// 🔐 CONFIGURAÇÕES DE PRODUÇÃO - SEM HEALTH CHECKS AUTOMÁTICOS
+// 🔐 CONFIGURAÇÕES DE PRODUÇÃO
 const DASHBOARD_CONFIG = {
-  AUTO_LOGOUT_TIME: 60 * 60 * 1000, // 1 hora em produção
+  AUTO_LOGOUT_TIME: 60 * 60 * 1000, // 1 hora
   SESSION_CHECK_INTERVAL: 10 * 60 * 1000, // 10 minutos
-  MAX_FAILED_REQUESTS: 5, // Mais tolerante em produção
+  MAX_FAILED_REQUESTS: 5,
   SENSITIVE_DATA_CLEANUP: 10 * 60 * 1000, // 10 minutos
-  HEALTH_CHECK_ENABLED: false, // 🚨 DESABILITADO: Sem health checks automáticos
+  HEALTH_CHECK_ENABLED: false, // 🚨 DESABILITADO em produção
   SECURITY_ALERTS_ENABLED: true,
-  REQUEST_TIMEOUT: 30000, // 30 segundos em produção
+  REQUEST_TIMEOUT: 30000, // 30 segundos
   PRODUCTION_MODE: true,
-  DEBUG_ENABLED: false, // 🚨 DESABILITADO: Sem logs de debug
+  DEBUG_ENABLED: false, // 🚨 DESABILITADO em produção
   MANUAL_REFRESH_ENABLED: true,
-  AUTO_REFRESH_ENABLED: false // 🚨 DESABILITADO: Sem refresh automático
+  AUTO_REFRESH_ENABLED: false // 🚨 DESABILITADO em produção
 };
 
 const Dashboard = () => {
-  // 🔧 Estados principais
+  // 🔧 ESTADOS PRINCIPAIS
   const [activeTab, setActiveTab] = useState('dashboard');
   const [systemStatus, setSystemStatus] = useState({
     online: true,
@@ -71,10 +69,14 @@ const Dashboard = () => {
   const [failedRequests, setFailedRequests] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // 🔐 Hook de autenticação
+  // 🎨 ESTADOS DE UI
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  
+  // 🔐 HOOK DE AUTENTICAÇÃO
   const { user, logout, isAdmin, isManager, isAuthenticated } = useAuth();
   
-  // 🎯 Hooks principais
+  // 🎯 HOOKS PRINCIPAIS
   const { data, loading, error, loadData, clearError } = useDashboardData();
   const { 
     showModal, 
@@ -86,7 +88,7 @@ const Dashboard = () => {
     handleInputChange 
   } = useModal();
 
-  // 🏦 Hook bancário OTIMIZADO
+  // 🏦 HOOK BANCÁRIO OTIMIZADO
   const {
     boletos: boletosBancarios = [],
     loading: loadingBoletos = false,
@@ -100,12 +102,12 @@ const Dashboard = () => {
     userBankProfile
   } = useSecureBankMonitor();
 
-  // 🔧 Referencias para controle
+  // 🔧 REFERENCIAS PARA CONTROLE
   const mountedRef = useRef(true);
   const failedRequestsRef = useRef(0);
   const refreshTimeoutRef = useRef(null);
 
-  // 📊 Estatísticas memoizadas para performance
+  // 📊 ESTATÍSTICAS MEMOIZADAS
   const estatisticasBoletos = useMemo(() => {
     try {
       return getEstatisticas();
@@ -121,7 +123,7 @@ const Dashboard = () => {
     }
   }, [getEstatisticas]);
 
-  // 🔐 SISTEMA DE ALERTAS DE SEGURANÇA - PRODUÇÃO
+  // 🔐 SISTEMA DE ALERTAS DE SEGURANÇA
   const addSecurityAlert = useCallback((type, message, autoHide = true) => {
     if (!DASHBOARD_CONFIG.SECURITY_ALERTS_ENABLED) {
       return;
@@ -136,30 +138,26 @@ const Dashboard = () => {
     
     setSecurityAlerts(prev => [...prev.slice(-2), alert]);
     
-    // Auto-remover em produção (mais rápido)
     if (autoHide) {
       setTimeout(() => {
         if (mountedRef.current) {
           setSecurityAlerts(prev => prev.filter(a => a.id !== alert.id));
         }
-      }, 5000); // 5 segundos em produção
+      }, 5000);
     }
     
-    // Log simplificado em produção
     if (type === 'error') {
       console.error(`🔐 Security Alert: ${message}`);
     }
   }, []);
 
-  // 🔐 VERIFICAÇÃO DE SISTEMA - SEM HEALTH CHECKS AUTOMÁTICOS
+  // 🔐 VERIFICAÇÃO DE SISTEMA MANUAL
   const checkSystemHealth = useCallback(async () => {
-    // 🚨 VERIFICAÇÃO CRÍTICA: Health checks desabilitados em produção
     if (!DASHBOARD_CONFIG.HEALTH_CHECK_ENABLED) {
       console.log('🔍 Health checks desabilitados em produção');
       return;
     }
 
-    // Esta função só é executada manualmente agora
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), DASHBOARD_CONFIG.REQUEST_TIMEOUT);
@@ -194,7 +192,7 @@ const Dashboard = () => {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        return; // Timeout silencioso em produção
+        return;
       }
 
       failedRequestsRef.current += 1;
@@ -210,12 +208,12 @@ const Dashboard = () => {
     }
   }, [addSecurityAlert]);
 
-  // 🔐 DETECTOR DE ATIVIDADE PARA SESSÃO
+  // 🔐 DETECTOR DE ATIVIDADE
   const updateActivity = useCallback(() => {
     setLastActivity(Date.now());
   }, []);
 
-  // 🚨 FUNÇÃO PARA VERIFICAÇÃO MANUAL (apenas para admins)
+  // 🚨 VERIFICAÇÃO MANUAL DO SISTEMA (apenas admins)
   const manualSystemCheck = useCallback(async () => {
     if (!isAdmin()) {
       addSecurityAlert('warning', 'Acesso negado - apenas administradores');
@@ -224,7 +222,6 @@ const Dashboard = () => {
 
     console.log('🔍 Verificação manual do sistema solicitada');
     
-    // Temporariamente habilitar para esta execução
     const originalEnabled = DASHBOARD_CONFIG.HEALTH_CHECK_ENABLED;
     DASHBOARD_CONFIG.HEALTH_CHECK_ENABLED = true;
     
@@ -240,7 +237,7 @@ const Dashboard = () => {
     }
   }, [checkSystemHealth, addSecurityAlert, isAdmin]);
 
-  // 🔐 INICIALIZAÇÃO DE PRODUÇÃO - SEM HEALTH CHECKS AUTOMÁTICOS
+  // 🔐 INICIALIZAÇÃO DE PRODUÇÃO
   useEffect(() => {
     if (!isAuthenticated || !mountedRef.current) {
       setSystemStatus({
@@ -254,11 +251,6 @@ const Dashboard = () => {
 
     console.log('🚀 Dashboard iniciado em modo produção para:', user?.username);
 
-    // 🚨 REMOVIDO: Verificações automáticas de health
-    // 🚨 REMOVIDO: setInterval para health checks
-    // 🚨 REMOVIDO: Polling automático
-
-    // ✅ APENAS: Configurar estado inicial
     if (mountedRef.current) {
       setSystemStatus({
         online: true,
@@ -274,7 +266,6 @@ const Dashboard = () => {
     }
 
     return () => {
-      // Cleanup básico
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
@@ -282,7 +273,7 @@ const Dashboard = () => {
     };
   }, [isAuthenticated, user?.username, addSecurityAlert]);
 
-  // 🔐 MONITORAMENTO DE ATIVIDADE - PRODUÇÃO
+  // 🔐 MONITORAMENTO DE ATIVIDADE
   useEffect(() => {
     const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
     
@@ -292,14 +283,13 @@ const Dashboard = () => {
       document.addEventListener(event, handleActivity, { passive: true });
     });
     
-    // Auto-logout por inatividade em produção
     const inactivityCheck = setInterval(() => {
       const now = Date.now();
       if (now - lastActivity > DASHBOARD_CONFIG.AUTO_LOGOUT_TIME) {
         addSecurityAlert('warning', 'Sessão expirada por inatividade');
         handleSecureLogout();
       }
-    }, 60000); // Verificar a cada minuto
+    }, 60000);
     
     return () => {
       events.forEach(event => {
@@ -309,7 +299,7 @@ const Dashboard = () => {
     };
   }, [lastActivity, updateActivity]);
 
-  // 🔄 CARREGAMENTO INICIAL - SEM POLLING AUTOMÁTICO
+  // 🔄 CARREGAMENTO INICIAL
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -336,10 +326,9 @@ const Dashboard = () => {
     };
   }, []);
 
-  // 🔐 LOGOUT SEGURO EM PRODUÇÃO
+  // 🔐 LOGOUT SEGURO
   const handleSecureLogout = useCallback(async () => {
     try {
-      // Limpeza de dados sensíveis
       setSystemStatus({
         online: false,
         lastCheck: 0,
@@ -352,12 +341,11 @@ const Dashboard = () => {
       console.log('🔓 Logout seguro concluído');
     } catch (error) {
       console.error('Erro no logout:', error);
-      // Forçar logout em caso de erro
       window.location.reload();
     }
   }, [logout]);
 
-  // 🔄 REFRESH MANUAL DE DADOS
+  // 🔄 REFRESH MANUAL
   const handleManualRefresh = useCallback(async () => {
     if (isRefreshing) return;
     
@@ -378,7 +366,7 @@ const Dashboard = () => {
     }
   }, [isRefreshing, loadData, clearError, updateActivity, addSecurityAlert]);
 
-  // 🛠️ REQUISIÇÕES SEGURAS EM PRODUÇÃO
+  // 🛠️ REQUISIÇÕES SEGURAS
   const handleSecureRequest = useCallback(async (url, options = {}) => {
     try {
       updateActivity();
@@ -424,7 +412,7 @@ const Dashboard = () => {
     }
   }, [updateActivity, addSecurityAlert, handleSecureLogout]);
 
-  // 🛠️ FUNÇÕES CRUD - PRODUÇÃO
+  // 🛠️ FUNÇÕES CRUD
   const handleCreateItem = useCallback(async (type, itemData) => {
     try {
       let endpoint = '';
@@ -591,7 +579,6 @@ const Dashboard = () => {
         await navigator.clipboard.writeText(codigo);
         addSecurityAlert('success', 'Código copiado');
       } else {
-        // Fallback
         const textArea = document.createElement('textarea');
         textArea.value = codigo;
         textArea.style.position = 'fixed';
@@ -628,7 +615,7 @@ const Dashboard = () => {
     }
   }, []);
 
-  // 🎨 LOADING STATE - PRODUÇÃO
+  // 🎨 LOADING STATE
   if (loading && !data.projects && !data.clientes) {
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
@@ -645,7 +632,7 @@ const Dashboard = () => {
     );
   }
 
-  // 🎨 ERROR STATE - PRODUÇÃO
+  // 🎨 ERROR STATE
   if (error && !data.projects && !data.clientes) {
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
@@ -668,13 +655,25 @@ const Dashboard = () => {
     );
   }
 
-  // 📋 RENDERIZAR CONTEÚDO POR ABA
+  // 📋 RENDERIZAR CONTEÚDO POR ABA - NOVA LÓGICA ORGANIZADA
   const renderContent = () => {
+    // Props comuns que todos os componentes precisam
+    const commonProps = {
+      data,
+      loading: isRefreshing,
+      formatCurrency,
+      formatDate,
+      formatTimestamp,
+      openModal,
+      handleDeleteItem,
+      user
+    };
+
     switch (activeTab) {
       case 'dashboard': 
         return (
           <DashboardContent 
-            data={data}
+            {...commonProps}
             boletosBancarios={boletosBancarios}
             estatisticasBoletos={estatisticasBoletos}
             statusBancos={statusBancos}
@@ -683,17 +682,12 @@ const Dashboard = () => {
             ultimaVerificacao={ultimaVerificacao}
             bancosConfigurados={bancosConfigurados}
             errorBoletos={errorBoletos}
-            formatCurrency={formatCurrency}
-            formatDate={formatDate}
-            formatTimestamp={formatTimestamp}
             copiarCodigoBarras={copiarCodigoBarras}
             setActiveTab={setActiveTab}
-            openModal={openModal}
             handlePayBill={handlePayBill}
             handleMarkNotificationAsRead={handleMarkNotificationAsRead}
             handleMarkAllNotificationsAsRead={handleMarkAllNotificationsAsRead}
             loadData={handleManualRefresh}
-            user={user}
             systemStatus={systemStatus}
             isSecure={isSecure}
             userBankProfile={userBankProfile}
@@ -703,56 +697,96 @@ const Dashboard = () => {
       
       case 'projects': 
         return (
-          <ProjectsSection 
-            projects={data.projects || []} 
-            fullView={true}
-            onEdit={(project) => openModal('projeto', project)}
-            onCreate={() => openModal('projeto')}
-            onDelete={(id) => handleDeleteItem('projeto', id)}
-            loading={loading}
-          />
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <Building2 className="w-6 h-6 text-blue-600" />
+                  </div>
+                  🏗️ Projetos
+                </h1>
+                <p className="text-gray-600 mt-2">
+                  {data.projects?.length || 0} projeto(s) em andamento
+                </p>
+              </div>
+              <button 
+                onClick={() => openModal('projeto')}
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+              >
+                <Building2 className="w-5 h-5" />
+                Novo Projeto
+              </button>
+            </div>
+            <ProjectsSection 
+              projects={data.projects || []} 
+              fullView={true}
+              onEdit={(project) => openModal('projeto', project)}
+              onCreate={() => openModal('projeto')}
+              onDelete={(id) => handleDeleteItem('projeto', id)}
+              loading={isRefreshing}
+            />
+          </div>
         );
       
       case 'clients':
         return (
           <ClientsContent 
+            {...commonProps}
             clientes={data.clientes || []}
-            openModal={openModal}
-            handleDeleteItem={handleDeleteItem}
-            loading={loading}
           />
         );
       
       case 'bills':
         return (
-          <BillsSection 
-            bills={data.bills || []}
-            onEdit={(bill) => openModal('conta', bill)}
-            onPay={handlePayBill}
-            onCreate={() => openModal('conta')}
-            onDelete={(id) => handleDeleteItem('conta', id)}
-            fullView={true}
-            loading={loading}
-          />
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                    <FileText className="w-6 h-6 text-green-600" />
+                  </div>
+                  💰 Contas a Pagar
+                </h1>
+                <p className="text-gray-600 mt-2">
+                  {data.bills?.length || 0} conta(s) cadastrada(s)
+                </p>
+              </div>
+              <button 
+                onClick={() => openModal('conta')}
+                className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+              >
+                <FileText className="w-5 h-5" />
+                Nova Conta
+              </button>
+            </div>
+            <BillsSection 
+              bills={data.bills || []}
+              onEdit={(bill) => openModal('conta', bill)}
+              onPay={handlePayBill}
+              onCreate={() => openModal('conta')}
+              onDelete={(id) => handleDeleteItem('conta', id)}
+              fullView={true}
+              loading={isRefreshing}
+            />
+          </div>
         );
 
       case 'boleto-monitor':
         return (
-          <BoletoMonitorContent 
-            boletosBancarios={boletosBancarios}
-            estatisticasBoletos={estatisticasBoletos}
-            statusBancos={statusBancos}
-            loadingBoletos={loadingBoletos}
-            verificarTodosBoletos={verificarTodosBoletos}
-            ultimaVerificacao={ultimaVerificacao}
-            bancosConfigurados={bancosConfigurados}
-            errorBoletos={errorBoletos}
-            formatCurrency={formatCurrency}
-            formatDate={formatDate}
-            formatTimestamp={formatTimestamp}
-            copiarCodigoBarras={copiarCodigoBarras}
-            setActiveTab={setActiveTab}
-          />
+          <div className="bg-white rounded-lg shadow-sm border">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <Building2 className="w-6 h-6 text-purple-600" />
+                Monitor de Boletos
+              </h1>
+            </div>
+            <div className="p-6 text-center py-12">
+              <Database className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Monitor Bancário Completo</h3>
+              <p className="text-gray-600">Funcionalidade em desenvolvimento para produção</p>
+            </div>
+          </div>
         );
 
       case 'bank-config':
@@ -760,11 +794,48 @@ const Dashboard = () => {
       
       case 'files':
         return (
-          <FilesContent 
-            files={data.files || []}
-            formatDate={formatDate}
-            loading={loading}
-          />
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                    <FileText className="w-6 h-6 text-purple-600" />
+                  </div>
+                  📁 Arquivos
+                </h1>
+                <p className="text-gray-600 mt-2">
+                  {data.files?.length || 0} arquivo(s) no sistema
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  // Implementar upload de arquivos
+                  alert('Funcionalidade de upload em desenvolvimento');
+                }}
+                className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+              >
+                <FileText className="w-5 h-5" />
+                Upload Arquivo
+              </button>
+            </div>
+            <FilesSection 
+              files={data.files || []}
+              projects={data.projects || []}
+              onUpload={(files) => {
+                console.log('Arquivos para upload:', files);
+                // Implementar lógica de upload
+              }}
+              onDelete={(fileId) => {
+                console.log('Excluir arquivo:', fileId);
+                // Implementar lógica de exclusão
+              }}
+              onPreview={(file) => {
+                console.log('Preview do arquivo:', file);
+                // Implementar preview
+              }}
+              loading={isRefreshing}
+            />
+          </div>
         );
 
       case 'users':
@@ -777,7 +848,21 @@ const Dashboard = () => {
             </div>
           );
         }
-        return <UsersManagement />;
+        return (
+          <div className="bg-white rounded-lg shadow-sm border">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <Users className="w-6 h-6 text-green-600" />
+                Gerenciar Usuários
+              </h1>
+            </div>
+            <div className="p-6 text-center py-12">
+              <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Gerenciamento de Usuários</h3>
+              <p className="text-gray-600">Painel administrativo em desenvolvimento</p>
+            </div>
+          </div>
+        );
       
       default: 
         return (
@@ -798,7 +883,7 @@ const Dashboard = () => {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* 🔐 ALERTAS DE SEGURANÇA - PRODUÇÃO */}
+      {/* 🔐 ALERTAS DE SEGURANÇA */}
       {securityAlerts.length > 0 && (
         <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
           {securityAlerts.map(alert => (
@@ -879,7 +964,7 @@ const Dashboard = () => {
             </div>
             
             <div className="flex items-center gap-4">
-              {/* INDICADORES DE STATUS - PRODUÇÃO */}
+              {/* INDICADORES DE STATUS */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1 text-sm">
                   <div className={`w-2 h-2 rounded-full ${
@@ -922,15 +1007,30 @@ const Dashboard = () => {
                   </button>
                 )}
                 
-                {/* NOTIFICAÇÕES */}
-                <button className="relative p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                  <Bell className="w-5 h-5" />
-                  {data?.notifications?.filter(n => !n.lida).length > 0 && (
-                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full text-xs text-white flex items-center justify-center">
-                      {data.notifications.filter(n => !n.lida).length}
-                    </span>
-                  )}
-                </button>
+                {/* ✅ ALTERAÇÃO: NOTIFICAÇÕES COM DROPDOWN */}
+                <div className="relative">
+                  <button 
+                    onClick={() => setShowNotificationsModal(!showNotificationsModal)}
+                    className="relative p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Ver notificações"
+                  >
+                    <Bell className="w-5 h-5" />
+                    {data?.notifications?.filter(n => !n.lida).length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full text-xs text-white flex items-center justify-center">
+                        {data.notifications.filter(n => !n.lida).length}
+                      </span>
+                    )}
+                  </button>
+                  
+                  <NotificationsDropdown 
+                    show={showNotificationsModal}
+                    onClose={() => setShowNotificationsModal(false)}
+                    notifications={data?.notifications || []}
+                    onMarkAsRead={handleMarkNotificationAsRead}
+                    onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+                    formatDate={formatDate}
+                  />
+                </div>
               </div>
 
               <div className="h-6 w-px bg-gray-300"></div>
@@ -962,6 +1062,7 @@ const Dashboard = () => {
                 {/* MENU DO USUÁRIO */}
                 <div className="flex items-center gap-1">
                   <button 
+                    onClick={() => setShowSettingsModal(true)}
                     className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
                     title="Configurações"
                   >
@@ -986,7 +1087,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* 🎨 MODAL */}
+      {/* 🎨 MODAIS */}
       <Modal 
         show={showModal}
         type={modalType}
@@ -1005,6 +1106,13 @@ const Dashboard = () => {
         projects={data.projects || []}
       />
 
+      {/* MODAL DE CONFIGURAÇÕES */}
+      <SettingsModal 
+        show={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        user={user}
+      />
+
       {/* CSS PARA ANIMAÇÕES */}
       <style jsx>{`
         @keyframes slide-in {
@@ -1019,379 +1127,5 @@ const Dashboard = () => {
     </div>
   );
 };
-
-// 🎯 COMPONENTE DASHBOARD CONTENT - PRODUÇÃO
-const DashboardContent = ({
-  data,
-  boletosBancarios,
-  estatisticasBoletos,
-  statusBancos,
-  loadingBoletos,
-  verificarTodosBoletos,
-  ultimaVerificacao,
-  bancosConfigurados,
-  errorBoletos,
-  formatCurrency,
-  formatDate,
-  formatTimestamp,
-  copiarCodigoBarras,
-  setActiveTab,
-  openModal,
-  handlePayBill,
-  handleMarkNotificationAsRead,
-  handleMarkAllNotificationsAsRead,
-  loadData,
-  user,
-  systemStatus,
-  isSecure,
-  userBankProfile,
-  isRefreshing
-}) => {
-  return (
-    <div className="space-y-6">
-      {/* ✅ BOAS-VINDAS DE PRODUÇÃO */}
-      <div className="bg-gradient-to-r from-blue-50 via-purple-50 to-green-50 border border-blue-200 rounded-lg p-6">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center relative">
-            <User className="w-6 h-6 text-white" />
-            {isSecure && (
-              <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white">
-                <Lock className="w-2 h-2 text-white m-0.5" />
-              </div>
-            )}
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">
-              Bem-vindo, {user?.full_name?.split(' ')[0] || user?.username}! 👋
-            </h2>
-            <p className="text-gray-600">
-              Sistema em produção • <span className="font-medium text-blue-600">{user?.role}</span> • 
-              {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </p>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-green-600" />
-            <span className="text-green-700">Sistema Online</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-blue-600" />
-            <span className="text-blue-700">Produção Segura</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Server className="w-4 h-4 text-purple-600" />
-            <span className="text-purple-700">Alta Performance</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-orange-600" />
-            <span className="text-orange-700">Dados Protegidos</span>
-          </div>
-        </div>
-
-        {/* INDICADORES DE SISTEMA */}
-        {systemStatus && (
-          <div className="mt-4 pt-4 border-t border-blue-200">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">Versão:</span>
-                <span className="font-medium text-blue-600">{systemStatus.version}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">Status:</span>
-                <span className={`font-medium ${systemStatus.online ? 'text-green-600' : 'text-red-600'}`}>
-                  {systemStatus.online ? '🟢 Online' : '🔴 Offline'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">Modo:</span>
-                <span className="font-medium text-purple-600">Produção</span>
-              </div>
-            </div>
-            
-            {userBankProfile?.configured_banks?.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-blue-100">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-600">Bancos Configurados:</span>
-                  <div className="flex gap-1">
-                    {userBankProfile.configured_banks.map(banco => (
-                      <span key={banco} className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs">
-                        {banco === 'BRADESCO' ? '🔴 BRA' : banco === 'ITAU' ? '🟠 ITA' : '🟡 BB'}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* CONTROLES E STATUS */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Calendar className="w-4 h-4" />
-          <span>Última atualização: {new Date().toLocaleString('pt-BR')}</span>
-          {systemStatus && (
-            <>
-              <span className="text-gray-400">•</span>
-              <span className={`font-medium flex items-center gap-1 ${systemStatus.online ? 'text-green-600' : 'text-red-600'}`}>
-                {systemStatus.online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                {systemStatus.online ? 'Conectado' : 'Desconectado'}
-              </span>
-            </>
-          )}
-        </div>
-        <button 
-          onClick={loadData}
-          disabled={isRefreshing}
-          className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
-          title="Atualização manual"
-        >
-          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <Lock className="w-3 h-3" />
-          <span className="text-sm font-medium">
-            {isRefreshing ? 'Atualizando...' : 'Atualizar'}
-          </span>
-        </button>
-      </div>
-
-      {/* CARDS DE ESTATÍSTICAS */}
-      <StatsCards 
-        stats={data.stats || {}} 
-        projects={data.projects || []}
-        bills={data.bills || []}
-        files={data.files || []}
-        clientes={data.clientes || []}
-        loading={isRefreshing}
-      />
-
-      {/* SEÇÕES PRINCIPAIS */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* PROJETOS */}
-        <div className="bg-white rounded-lg shadow-sm border">
-          <ProjectsSection 
-            projects={data.projects || []}
-            onEdit={(project) => openModal('projeto', project)}
-            onCreate={() => openModal('projeto')}
-            fullView={false}
-            loading={isRefreshing}
-          />
-        </div>
-
-        {/* CONTAS A PAGAR */}
-        <div className="bg-white rounded-lg shadow-sm border">
-          <BillsSection 
-            bills={data.bills || []}
-            onEdit={(bill) => openModal('conta', bill)}
-            onPay={handlePayBill}
-            onCreate={() => openModal('conta')}
-            onViewAll={() => setActiveTab('bills')}
-            fullView={false}
-            loading={isRefreshing}
-          />
-        </div>
-      </div>
-
-      {/* MONITOR BANCÁRIO (SE CONFIGURADO) */}
-      {isSecure && userBankProfile?.configured_banks?.length > 0 && (
-        <div className="bg-white rounded-lg shadow-sm border">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-purple-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Monitor Bancário</h3>
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                  {userBankProfile.configured_banks.length} banco(s)
-                </span>
-              </div>
-              <button 
-                onClick={() => setActiveTab('boleto-monitor')}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-              >
-                Ver detalhes →
-              </button>
-            </div>
-          </div>
-          
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">
-                  {estatisticasBoletos.total || 0}
-                </div>
-                <div className="text-sm text-gray-600">Total de Boletos</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-yellow-600">
-                  {estatisticasBoletos.pendentes || 0}
-                </div>
-                <div className="text-sm text-gray-600">Pendentes</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">
-                  {formatCurrency(estatisticasBoletos.valorTotal || 0)}
-                </div>
-                <div className="text-sm text-gray-600">Valor Total</div>
-              </div>
-            </div>
-            
-            {ultimaVerificacao && (
-              <div className="mt-4 pt-4 border-t border-gray-200 text-center">
-                <p className="text-xs text-gray-500">
-                  Última verificação: {formatTimestamp(ultimaVerificacao)}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* NOTIFICAÇÕES */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <NotificationsSection 
-          notifications={data.notifications || []}
-          onMarkAsRead={handleMarkNotificationAsRead}
-          onMarkAllAsRead={handleMarkAllNotificationsAsRead}
-          loading={isRefreshing}
-        />
-      </div>
-    </div>
-  );
-};
-
-// 🎯 COMPONENTES AUXILIARES - SIMPLIFICADOS PARA PRODUÇÃO
-const ClientsContent = ({ clientes, openModal, handleDeleteItem, loading }) => (
-  <div className="space-y-6">
-    <div className="flex justify-between items-center">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">👥 Clientes</h1>
-        <p className="text-gray-600 mt-1">{clientes.length} cliente(s) cadastrado(s)</p>
-      </div>
-      <button 
-        onClick={() => openModal('cliente')}
-        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors"
-      >
-        <Users className="w-4 h-4" />
-        Novo Cliente
-      </button>
-    </div>
-    
-    <div className="bg-white rounded-lg shadow-sm border">
-      <div className="p-6">
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
-          </div>
-        ) : clientes.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {clientes.map(cliente => (
-              <div key={cliente.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900">{cliente.nome}</h3>
-                    <p className="text-sm text-gray-600">📧 {cliente.email}</p>
-                    <p className="text-sm text-gray-500">📞 {cliente.telefone}</p>
-                  </div>
-                  <div className="flex gap-1">
-                    <button 
-                      onClick={() => openModal('cliente', cliente)}
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Editar"
-                    >
-                      ✏️
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteItem('cliente', cliente.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Excluir"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
-                <div className="text-xs text-gray-500 space-y-1">
-                  <p>📍 {cliente.endereco}</p>
-                  <p>🏙️ {cliente.cidade}, {cliente.estado}</p>
-                  <p>📮 CEP: {cliente.cep}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-12">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Users className="w-8 h-8 text-gray-400" />
-            </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum cliente cadastrado</h3>
-            <p className="text-gray-500 mb-4">Comece adicionando seu primeiro cliente</p>
-            <button 
-              onClick={() => openModal('cliente')}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Users className="w-4 h-4 inline mr-2" />
-              Adicionar Cliente
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  </div>
-);
-
-const BoletoMonitorContent = (props) => (
-  <div className="bg-white rounded-lg shadow-sm border">
-    <div className="px-6 py-4 border-b border-gray-200">
-      <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-        <Building2 className="w-6 h-6 text-purple-600" />
-        Monitor de Boletos
-      </h1>
-    </div>
-    <div className="p-6 text-center py-12">
-      <Database className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-      <h3 className="text-lg font-medium text-gray-900 mb-2">Monitor Bancário Completo</h3>
-      <p className="text-gray-600">Funcionalidade em desenvolvimento para produção</p>
-    </div>
-  </div>
-);
-
-const FilesContent = ({ files, formatDate, loading }) => (
-  <div className="bg-white rounded-lg shadow-sm border">
-    <div className="px-6 py-4 border-b border-gray-200">
-      <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-        <FileText className="w-6 h-6 text-blue-600" />
-        Arquivos
-      </h1>
-    </div>
-    <div className="p-6 text-center py-12">
-      {loading ? (
-        <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
-      ) : (
-        <>
-          <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Gerenciamento de Arquivos</h3>
-          <p className="text-gray-600">{files.length} arquivo(s) • Sistema em desenvolvimento</p>
-        </>
-      )}
-    </div>
-  </div>
-);
-
-const UsersManagement = () => (
-  <div className="bg-white rounded-lg shadow-sm border">
-    <div className="px-6 py-4 border-b border-gray-200">
-      <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-        <Users className="w-6 h-6 text-green-600" />
-        Gerenciar Usuários
-      </h1>
-    </div>
-    <div className="p-6 text-center py-12">
-      <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-      <h3 className="text-lg font-medium text-gray-900 mb-2">Gerenciamento de Usuários</h3>
-      <p className="text-gray-600">Painel administrativo em desenvolvimento</p>
-    </div>
-  </div>
-);
 
 export default Dashboard;

@@ -1,20 +1,23 @@
-// 📁 frontend/src/hooks/useAuth.js - VERSÃO CORRIGIDA SEM LOOP INFINITO
+// 📁 frontend/src/hooks/useAuth.js - VERSÃO CORRIGIDA PARA PRODUÇÃO
 
 import React, { useState, useEffect, useCallback, createContext, useContext, useRef } from 'react';
 
 // 🔧 Configuração da API
 const API_BASE_URL = 'http://localhost:5000';
 
-// 🚨 CONFIGURAÇÕES ANTI-LOOP
+// 🚨 CONFIGURAÇÕES CORRIGIDAS PARA PRODUÇÃO
 const AUTH_CONFIG = {
-  TOKEN_CHECK_ENABLED: false,        // 🚨 Desabilitar verificação automática
-  TOKEN_CHECK_COOLDOWN: 300000,      // 🚨 5 minutos entre verificações
-  HEALTH_CHECK_ENABLED: false,       // 🚨 Desabilitar health checks
-  AUTO_VERIFY_ON_INIT: false,        // 🚨 Desabilitar verificação na inicialização
-  REQUEST_TIMEOUT: 15000,            // 🚨 15 segundos timeout
-  MAX_RETRY_ATTEMPTS: 2,             // 🚨 Máximo 2 tentativas
-  SESSION_COOLDOWN: 60000,           // 🚨 1 minuto entre sessões
-  ENABLE_DEBUG_LOGS: true            // 🚨 Logs detalhados para debug
+  TOKEN_CHECK_ENABLED: true,           // ✅ HABILITADO: Verificar token após F5
+  TOKEN_CHECK_COOLDOWN: 30000,         // ✅ REDUZIDO: 30 segundos entre verificações
+  HEALTH_CHECK_ENABLED: false,         // 🚨 MANTIDO: Sem health checks automáticos
+  AUTO_VERIFY_ON_INIT: true,           // ✅ HABILITADO: Verificar na inicialização
+  REQUEST_TIMEOUT: 15000,              // ✅ MANTIDO: 15 segundos timeout
+  MAX_RETRY_ATTEMPTS: 2,               // ✅ MANTIDO: Máximo 2 tentativas
+  SESSION_COOLDOWN: 60000,             // ✅ MANTIDO: 1 minuto entre sessões
+  ENABLE_DEBUG_LOGS: false,            // 🚨 DESABILITADO: Logs de debug em produção
+  PRODUCTION_MODE: true,               // ✅ PRODUÇÃO
+  PERSISTENT_SESSION: true,            // ✅ NOVO: Sessão persistente
+  FALLBACK_TO_SAVED: true              // ✅ NOVO: Usar dados salvos se API falhar
 };
 
 // 🔐 SINGLETON GLOBAL PARA CONTROLE DE INSTÂNCIAS
@@ -30,7 +33,7 @@ const GlobalAuthState = {
 // Contexto de autenticação
 const AuthContext = createContext(null);
 
-// Lógica principal de autenticação - CORRIGIDA
+// Lógica principal de autenticação - CORRIGIDA PARA PRODUÇÃO
 const useAuthLogic = () => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
@@ -88,12 +91,15 @@ const useAuthLogic = () => {
     return isAuthenticated && !!getAuthToken();
   }, [isAuthenticated, getAuthToken]);
 
-  // 🚨 NOVA: Função para fazer requisições controladas
+  // 🚨 FUNÇÃO PARA FAZER REQUISIÇÕES CONTROLADAS - MELHORADA
   const makeControlledRequest = useCallback(async (url, options = {}) => {
     // Controle de rate limiting
     GlobalAuthState.requestCount++;
-    if (GlobalAuthState.requestCount > 5) {
-      debugLog('🚨 Rate limit atingido, cancelando requisição');
+    if (GlobalAuthState.requestCount > 10) {
+      debugLog('🚨 Rate limit atingido, aguardando...');
+      setTimeout(() => {
+        GlobalAuthState.requestCount = Math.max(0, GlobalAuthState.requestCount - 1);
+      }, 5000);
       return null;
     }
 
@@ -128,32 +134,9 @@ const useAuthLogic = () => {
     }
   }, [debugLog]);
 
-  // 🔧 Verificar token com controles rigorosos - CORRIGIDA
+  // 🔧 VERIFICAÇÃO DE TOKEN CORRIGIDA PARA PRODUÇÃO
   const checkPersistedToken = useCallback(async () => {
-    // 🚨 VERIFICAÇÃO: Se verificação automática está desabilitada
-    if (!AUTH_CONFIG.TOKEN_CHECK_ENABLED) {
-      debugLog('🚨 Verificação automática de token desabilitada');
-      
-      // Usar dados salvos se existirem
-      const savedToken = localStorage.getItem('auth_token');
-      const savedUser = localStorage.getItem('auth_user');
-      
-      if (savedToken && savedUser) {
-        try {
-          const userData = JSON.parse(savedUser);
-          debugLog('✅ Usando dados salvos sem verificação:', userData.username);
-          saveAuthData(userData, savedToken);
-        } catch (error) {
-          debugLog('❌ Erro ao parsear dados salvos:', error);
-          clearAuthData();
-        }
-      }
-      
-      setLoading(false);
-      return;
-    }
-
-    debugLog('🔍 === VERIFICANDO TOKEN PERSISTIDO ===');
+    debugLog('🔍 === VERIFICANDO TOKEN PERSISTIDO (PRODUÇÃO) ===');
     
     const savedToken = localStorage.getItem('auth_token');
     const savedUser = localStorage.getItem('auth_user');
@@ -171,7 +154,7 @@ const useAuthLogic = () => {
       const userData = JSON.parse(savedUser);
       debugLog('🔍 Dados do usuário salvos:', userData.username);
       
-      // 🚨 VERIFICAÇÃO DE COOLDOWN: Evitar verificações muito frequentes
+      // ✅ VERIFICAÇÃO DE COOLDOWN REDUZIDA
       const lastCheck = GlobalAuthState.lastTokenCheck || parseInt(localStorage.getItem('last_token_check') || '0');
       const now = Date.now();
       
@@ -182,121 +165,120 @@ const useAuthLogic = () => {
         return;
       }
       
-      debugLog('🔍 Token (primeiros 20 chars):', savedToken.substring(0, 20) + '...');
+      // ✅ VERIFICAR TOKEN COM ENDPOINT - PRODUÇÃO
+      debugLog('🔍 Verificando token com servidor...');
       
-      // ✅ VERIFICAÇÃO DE SAÚDE DA API - CONDICIONAL
-      if (AUTH_CONFIG.HEALTH_CHECK_ENABLED) {
-        debugLog('🔍 Testando conexão com API...');
-        try {
-          const healthResponse = await makeControlledRequest(`${API_BASE_URL}/api/health`);
+      try {
+        const response = await makeControlledRequest(`${API_BASE_URL}/api/auth/verify-token`, {
+          headers: { 
+            'Authorization': `Bearer ${savedToken}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response) {
+          throw new Error('Nenhuma resposta recebida');
+        }
+
+        debugLog('🔍 Status da resposta:', response.status);
+
+        if (response.ok) {
+          const data = await response.json();
+          debugLog('🔍 Dados da verificação:', data);
           
-          if (!healthResponse || !healthResponse.ok) {
-            debugLog('❌ API não está respondendo, usando dados salvos');
-            saveAuthData(userData, savedToken);
+          if (data.success && data.valid && data.user) {
+            debugLog('✅ Token válido, restaurando sessão');
+            
+            // Atualizar dados com informações mais recentes do servidor
+            const updatedUser = {
+              ...userData,
+              ...data.user
+            };
+            
+            saveAuthData(updatedUser, savedToken);
             setLoading(false);
             return;
+          } else {
+            debugLog('❌ Resposta indica token inválido:', data);
+            throw new Error('Token inválido');
           }
-          
-          const healthData = await healthResponse.json();
-          debugLog('✅ API respondendo:', healthData.success);
-          
-          if (!healthData.security?.auth_system_enabled) {
-            debugLog('⚠️ Sistema de autenticação não habilitado, usando dados salvos');
-            saveAuthData(userData, savedToken);
-            setLoading(false);
-            return;
-          }
-          
-        } catch (healthError) {
-          debugLog('❌ Erro ao testar API, usando dados salvos:', healthError.message);
-          saveAuthData(userData, savedToken);
-          setLoading(false);
-          return;
-        }
-      }
-      
-      // ✅ VERIFICAR TOKEN COM ENDPOINT - COM CONTROLES
-      debugLog('🔍 Enviando requisição de verificação...');
-      
-      const response = await makeControlledRequest(`${API_BASE_URL}/api/auth/verify-token`, {
-        headers: { 
-          'Authorization': `Bearer ${savedToken}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response) {
-        debugLog('❌ Resposta nula, usando dados salvos');
-        saveAuthData(userData, savedToken);
-        setLoading(false);
-        return;
-      }
-
-      debugLog('🔍 Status da resposta:', response.status);
-
-      if (response.ok) {
-        const data = await response.json();
-        debugLog('🔍 Dados da verificação:', data);
-        
-        if (data.success && data.valid && data.user) {
-          debugLog('✅ Token válido, restaurando sessão');
-          
-          // Atualizar dados com informações mais recentes do servidor
-          const updatedUser = {
-            ...userData,
-            ...data.user
-          };
-          
-          saveAuthData(updatedUser, savedToken);
-          setLoading(false);
-          return;
         } else {
-          debugLog('❌ Resposta indica token inválido:', data);
-        }
-      } else {
-        let errorData;
-        try {
-          errorData = await response.json();
-          debugLog('❌ Resposta de erro (JSON):', errorData);
-        } catch {
-          const errorText = await response.text();
-          debugLog('❌ Resposta de erro (texto):', errorText);
+          let errorMessage = `HTTP ${response.status}`;
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorMessage;
+          } catch (e) {
+            // Usar status HTTP como fallback
+          }
+          
+          if (response.status === 401) {
+            debugLog('⏰ Token expirado (401)');
+            throw new Error('Token expirado');
+          }
+          
+          throw new Error(errorMessage);
         }
         
-        // Se for erro 401, token expirado
-        if (response.status === 401) {
-          debugLog('⏰ Token expirado (401)');
+      } catch (networkError) {
+        debugLog('❌ Erro de rede ao verificar token:', networkError.message);
+        
+        // ✅ FALLBACK MELHORADO: Se for erro de rede e temos dados salvos válidos
+        if (AUTH_CONFIG.FALLBACK_TO_SAVED && AUTH_CONFIG.PERSISTENT_SESSION) {
+          // Verificar se o token não parece obviamente expirado
+          const tokenParts = savedToken.split('.');
+          if (tokenParts.length === 3) {
+            try {
+              const payload = JSON.parse(atob(tokenParts[1]));
+              const now = Math.floor(Date.now() / 1000);
+              
+              // Se o token não expirou, usar dados salvos
+              if (payload.exp && payload.exp > now) {
+                debugLog('⚠️ Erro de rede, mas token ainda válido. Usando dados salvos.');
+                saveAuthData(userData, savedToken);
+                setLoading(false);
+                return;
+              } else {
+                debugLog('⏰ Token expirado detectado no payload');
+              }
+            } catch (decodeError) {
+              debugLog('❌ Erro ao decodificar token:', decodeError.message);
+            }
+          }
         }
+        
+        // Se chegou aqui, limpar dados
+        throw networkError;
       }
-      
-      debugLog('❌ Token inválido ou expirado, limpando dados');
-      clearAuthData();
       
     } catch (error) {
       debugLog('❌ Erro ao verificar token:', error.message);
       
-      // 🚨 SE FOR ERRO DE TIMEOUT OU REDE, MANTER DADOS SALVOS
-      if (error.name === 'AbortError' || error.name === 'TypeError') {
-        debugLog('⚠️ Erro de timeout/rede, mantendo dados salvos temporariamente');
+      // ✅ MANTER SESSÃO SE FOR ERRO DE CONECTIVIDADE E ESTAMOS EM PRODUÇÃO
+      if (AUTH_CONFIG.PERSISTENT_SESSION && 
+          (error.name === 'AbortError' || 
+           error.name === 'TypeError' || 
+           error.message.includes('Failed to fetch'))) {
+        
+        debugLog('⚠️ Erro de conectividade, mantendo sessão temporariamente');
         try {
           const userData = JSON.parse(savedUser);
           saveAuthData(userData, savedToken);
+          setLoading(false);
+          return;
         } catch (parseError) {
           debugLog('❌ Erro ao parsear dados salvos:', parseError);
-          clearAuthData();
         }
-        setLoading(false);
-        return;
       }
       
+      // Limpar dados apenas se for erro real de autenticação
       clearAuthData();
     } finally {
       setLoading(false);
     }
   }, [makeControlledRequest, saveAuthData, clearAuthData, debugLog]);
 
-  // 🔧 Debug de token manual - CORRIGIDA
+  // 🔧 Debug de token manual - MANTIDA
   const debugToken = useCallback(async (testToken = null) => {
     const tokenToTest = testToken || getAuthToken();
     
@@ -422,27 +404,8 @@ const useAuthLogic = () => {
     setError(null);
     
     try {
-      debugLog('🔑 === INICIANDO LOGIN ===');
+      debugLog('🔑 === INICIANDO LOGIN (PRODUÇÃO) ===');
       debugLog('🔑 Username:', username);
-      
-      // 🚨 VERIFICAÇÃO DE SAÚDE DA API - CONDICIONAL
-      if (AUTH_CONFIG.HEALTH_CHECK_ENABLED) {
-        debugLog('🔍 Verificando disponibilidade da API...');
-        try {
-          const healthResponse = await makeControlledRequest(`${API_BASE_URL}/api/health`);
-          if (!healthResponse || !healthResponse.ok) {
-            throw new Error(`API não disponível`);
-          }
-          const healthData = await healthResponse.json();
-          if (!healthData.success) {
-            throw new Error('API reporta problemas de saúde');
-          }
-          debugLog('✅ API disponível e saudável');
-        } catch (healthError) {
-          debugLog('❌ API não está disponível:', healthError.message);
-          throw new Error('Não foi possível conectar com o servidor. Verifique sua conexão.');
-        }
-      }
       
       const loginData = { username, password };
       
@@ -477,17 +440,6 @@ const useAuthLogic = () => {
         // ✅ SALVAR IMEDIATAMENTE
         saveAuthData(data.user, data.token);
         
-        // ✅ TESTE OPCIONAL DO TOKEN
-        if (AUTH_CONFIG.ENABLE_DEBUG_LOGS) {
-          debugLog('🔍 Testando token após login...');
-          try {
-            const tokenTest = await debugToken(data.token);
-            debugLog('🔍 Resultado do teste do token:', tokenTest);
-          } catch (debugError) {
-            debugLog('⚠️ Não foi possível testar token:', debugError.message);
-          }
-        }
-        
         return { success: true, user: data.user };
       } else {
         throw new Error(data.error || 'Credenciais inválidas');
@@ -500,9 +452,9 @@ const useAuthLogic = () => {
     } finally {
       setLoading(false);
     }
-  }, [makeControlledRequest, saveAuthData, debugToken, debugLog]);
+  }, [makeControlledRequest, saveAuthData, debugLog]);
 
-  // 🔧 Registrar usuário - CORRIGIDA
+  // 🔧 Registrar usuário - MANTIDA
   const register = useCallback(async (userData) => {
     setLoading(true);
     setError(null);
@@ -571,22 +523,19 @@ const useAuthLogic = () => {
     setError(null);
   }, []);
 
-  // 🚨 NOVA: Inicialização manual
+  // 🚨 VERIFICAÇÃO MANUAL DE TOKEN
   const manualTokenCheck = useCallback(async () => {
     debugLog('🔍 Verificação manual de token solicitada');
     
-    // Temporariamente habilitar verificação
-    const originalEnabled = AUTH_CONFIG.TOKEN_CHECK_ENABLED;
-    AUTH_CONFIG.TOKEN_CHECK_ENABLED = true;
-    
+    setLoading(true);
     try {
       await checkPersistedToken();
     } finally {
-      AUTH_CONFIG.TOKEN_CHECK_ENABLED = originalEnabled;
+      setLoading(false);
     }
   }, [checkPersistedToken, debugLog]);
 
-  // 🚨 NOVA: Reset completo do sistema de auth
+  // 🚨 RESET COMPLETO DO SISTEMA DE AUTH
   const resetAuth = useCallback(() => {
     debugLog('🔄 Reset completo do sistema de autenticação');
     
@@ -608,7 +557,7 @@ const useAuthLogic = () => {
     debugLog('✅ Reset completo concluído');
   }, [clearAuthData, debugLog]);
 
-  // 🚨 NOVA: Obter status do sistema
+  // 🚨 OBTER STATUS DO SISTEMA
   const getAuthStatus = useCallback(() => {
     return {
       isInitialized: GlobalAuthState.isInitialized,
@@ -626,73 +575,68 @@ const useAuthLogic = () => {
     };
   }, [getAuthToken, user, isAuthenticated, loading, error]);
 
-  // ✅ INICIALIZAÇÃO CONTROLADA - CORRIGIDA
+  // ✅ INICIALIZAÇÃO CORRIGIDA PARA PRODUÇÃO
   useEffect(() => {
-    // 🚨 VERIFICAÇÃO RIGOROSA: Evitar múltiplas inicializações
+    // 🚨 VERIFICAÇÃO: Evitar múltiplas inicializações
     if (GlobalAuthState.isInitialized || !mountedRef.current) {
       debugLog('🚀 Inicialização pulada - já inicializado ou componente desmontado');
+      
+      // ✅ IMPORTANTE: Se já foi inicializado mas não temos dados, carregar do localStorage
+      if (!isAuthenticated && !loading) {
+        const savedToken = localStorage.getItem('auth_token');
+        const savedUser = localStorage.getItem('auth_user');
+        
+        if (savedToken && savedUser) {
+          debugLog('🔍 Encontrados dados salvos, carregando...');
+          try {
+            const userData = JSON.parse(savedUser);
+            saveAuthData(userData, savedToken);
+          } catch (error) {
+            debugLog('❌ Erro ao carregar dados salvos:', error);
+          }
+        }
+      }
+      
       setLoading(false);
       return;
     }
 
-    // 🚨 VERIFICAÇÃO DE SESSÃO: Evitar reinicializações na mesma sessão
-    const sessionFlag = sessionStorage.getItem('auth_init');
-    if (sessionFlag && !AUTH_CONFIG.AUTO_VERIFY_ON_INIT) {
-      debugLog('🚀 Inicialização pulada - sessão já inicializada');
-      setLoading(false);
-      return;
-    }
-
-    debugLog('🚀 === INICIALIZANDO SISTEMA DE AUTENTICAÇÃO ===');
+    debugLog('🚀 === INICIALIZANDO SISTEMA DE AUTENTICAÇÃO (PRODUÇÃO) ===');
     
     // Marcar como inicializado
     GlobalAuthState.isInitialized = true;
     GlobalAuthState.instance = instanceRef.current;
     GlobalAuthState.sessionFlag = Date.now();
-    sessionStorage.setItem('auth_init', GlobalAuthState.sessionFlag.toString());
     
-    // 🚨 DELAY PARA EVITAR CONFLITOS
-    const timer = setTimeout(() => {
-      if (mountedRef.current) {
-        checkPersistedToken();
-      }
-    }, 1000); // 1 segundo de delay
+    // ✅ VERIFICAR TOKEN IMEDIATAMENTE EM PRODUÇÃO
+    if (AUTH_CONFIG.AUTO_VERIFY_ON_INIT && mountedRef.current) {
+      debugLog('🔍 Verificando token na inicialização...');
+      checkPersistedToken();
+    } else {
+      setLoading(false);
+    }
 
     return () => {
-      clearTimeout(timer);
+      // Não limpar o estado global na desmontagem em produção
+      debugLog(`🧹 Desmontando instância ${instanceRef.current} (mantendo estado global)`);
     };
   }, []); // ✅ ARRAY VAZIO - EXECUTA APENAS UMA VEZ
 
-  // ✅ CLEANUP RIGOROSO
+  // ✅ CLEANUP CONTROLADO
   useEffect(() => {
     return () => {
-      debugLog(`🧹 Limpando instância de auth ${instanceRef.current}`);
       mountedRef.current = false;
       
-      // Liberar controle se for a instância ativa
+      // Apenas liberar controle se for a instância ativa
       if (GlobalAuthState.instance === instanceRef.current) {
-        GlobalAuthState.instance = null;
         debugLog(`🔓 Instância ${instanceRef.current} liberou controle de auth`);
+        // Não resetar o estado global em produção
       }
       
       // Reset contador
       GlobalAuthState.requestCount = Math.max(0, GlobalAuthState.requestCount - 1);
     };
   }, [debugLog]);
-
-  // ✅ DEBUG: Log de mudanças de estado - CONDICIONAL
-  useEffect(() => {
-    if (AUTH_CONFIG.ENABLE_DEBUG_LOGS) {
-      debugLog('🔍 === ESTADO DA AUTENTICAÇÃO ATUALIZADO ===');
-      debugLog('   isAuthenticated:', isAuthenticated);
-      debugLog('   hasUser:', !!user);
-      debugLog('   hasToken:', !!getAuthToken());
-      debugLog('   loading:', loading);
-      debugLog('   error:', error);
-      debugLog('   username:', user?.username);
-      debugLog('   role:', user?.role);
-    }
-  }, [isAuthenticated, user, getAuthToken, loading, error, debugLog]);
 
   return {
     // Dados principais
@@ -714,19 +658,13 @@ const useAuthLogic = () => {
     authenticatedRequest,
     clearError,
     
-    // 🚨 NOVAS: Controles manuais
+    // 🚨 Controles manuais
     manualTokenCheck,
     resetAuth,
     getAuthStatus,
     
     // Funções de debug
-    checkPersistedToken: () => {
-      const originalEnabled = AUTH_CONFIG.TOKEN_CHECK_ENABLED;
-      AUTH_CONFIG.TOKEN_CHECK_ENABLED = true;
-      const result = checkPersistedToken();
-      AUTH_CONFIG.TOKEN_CHECK_ENABLED = originalEnabled;
-      return result;
-    },
+    checkPersistedToken,
     debugToken,
     
     // Status e configuração

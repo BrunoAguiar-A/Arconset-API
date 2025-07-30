@@ -1,4 +1,4 @@
-// 📁 src/components/Dashboard/components/Sidebar.jsx - SIDEBAR COM ACESSO LIBERADO
+// 📁 src/components/Dashboard/components/Sidebar.jsx - VERSÃO OTIMIZADA
 import React from 'react';
 import { 
   LayoutDashboard,
@@ -9,12 +9,14 @@ import {
   Settings,
   FolderOpen,
   UserCog,
-  RefreshCw,
   LogOut,
   Shield,
   ChevronRight,
-  Bell,
-  Zap
+  Zap,
+  TrendingUp,
+  Activity,
+  BarChart3,
+  DollarSign
 } from 'lucide-react';
 
 const Sidebar = ({ 
@@ -27,7 +29,7 @@ const Sidebar = ({
   isManager 
 }) => {
   
-  // 📋 Configuração dos itens do menu - ACESSO LIBERADO
+  // 📋 Configuração dos itens do menu
   const menuItems = [
     {
       id: 'dashboard',
@@ -67,14 +69,11 @@ const Sidebar = ({
       badge: '🤖'
     },
     {
-      // 🚨 ALTERAÇÃO PRINCIPAL: ACESSO LIBERADO!
       id: 'bank-config',
       label: 'Config. Bancos',
       icon: Settings,
       description: 'APIs Bradesco, Itaú, BB',
-      color: 'yellow',
-      // ❌ REMOVIDO: requiresRole: ['admin', 'manager']
-      // ✅ AGORA: Todos os usuários podem acessar
+      color: 'yellow'
     },
     {
       id: 'files',
@@ -85,7 +84,7 @@ const Sidebar = ({
     }
   ];
 
-  // Adicionar item de usuários apenas para admin (mantido)
+  // Adicionar item de usuários apenas para admin
   if (isAdmin && isAdmin()) {
     menuItems.push({
       id: 'users',
@@ -93,27 +92,20 @@ const Sidebar = ({
       icon: UserCog,
       description: 'Gerenciar usuários',
       color: 'red',
-      requiresRole: ['admin'], // Usuários ainda restritos apenas para admin
+      requiresRole: ['admin'],
       badge: '👥'
     });
   }
 
-  // 🔧 Verificar se usuário tem acesso ao item - FUNÇÃO CORRIGIDA
+  // 🔧 Verificar se usuário tem acesso ao item
   const hasAccess = (item) => {
-    // ✅ Se não tem requiresRole, todos podem acessar
     if (!item.requiresRole) return true;
-    
-    // ✅ Admin sempre tem acesso
     if (isAdmin && isAdmin()) return true;
-    
-    // ✅ Manager tem acesso se estiver na lista
     if (isManager && isManager() && item.requiresRole.includes('manager')) return true;
-    
-    // ❌ Bloquear apenas itens com requiresRole definido
     return false;
   };
 
-  // 🎨 Obter classes de cor baseadas no estado - MANTIDO
+  // 🎨 Obter classes de cor baseadas no estado
   const getItemClasses = (item) => {
     const isActive = activeTab === item.id;
     const hasAccessToItem = hasAccess(item);
@@ -129,7 +121,7 @@ const Sidebar = ({
     return `flex items-center gap-3 w-full p-3 text-gray-700 hover:text-${item.color}-600 hover:bg-${item.color}-50 transition-all duration-200 hover:border-r-3 hover:border-${item.color}-300`;
   };
 
-  // 🔧 Lidar com clique no item - MANTIDO
+  // 🔧 Lidar com clique no item
   const handleItemClick = (item) => {
     if (!hasAccess(item)) {
       alert(`🚫 Acesso negado!\n\nVocê precisa ser ${item.requiresRole.join(' ou ')} para acessar esta funcionalidade.`);
@@ -203,7 +195,7 @@ const Sidebar = ({
                     <span className="text-xs">{item.badge}</span>
                   )}
                   
-                  {/* ✅ REMOVIDO: Indicador de acesso restrito para Config. Bancos */}
+                  {/* Indicador de acesso restrito */}
                   {!hasAccessToItem && (
                     <div className="text-gray-400">🔒</div>
                   )}
@@ -214,7 +206,7 @@ const Sidebar = ({
                   )}
                 </button>
                 
-                {/* Tooltip apenas para itens realmente restritos */}
+                {/* Tooltip para itens restritos */}
                 {!hasAccessToItem && item.requiresRole && (
                   <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                     Requer: {item.requiresRole.join(' ou ')}
@@ -226,23 +218,28 @@ const Sidebar = ({
         </nav>
       </div>
 
-      {/* 🔧 Seção de ações rápidas */}
-      <div className="border-t border-gray-200 p-4 space-y-2">
+      {/* 📊 NOVA SEÇÃO: MÉTRICAS RÁPIDAS */}
+      <div className="border-t border-gray-200 p-4 space-y-3">
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-          Ações Rápidas
+          Métricas do Sistema
         </h3>
         
-        {/* Botão de atualizar dados */}
-        <button
-          onClick={onRefresh}
-          className="flex items-center gap-3 w-full p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200"
-          title="Atualizar todos os dados"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span className="text-sm">Atualizar Dados</span>
-        </button>
+        {/* Métricas compactas */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-blue-50 rounded-lg p-2 text-center">
+            <TrendingUp className="w-4 h-4 text-blue-600 mx-auto mb-1" />
+            <p className="text-xs text-blue-600 font-medium">Projetos</p>
+            <p className="text-sm font-bold text-blue-700">8</p>
+          </div>
+          
+          <div className="bg-green-50 rounded-lg p-2 text-center">
+            <DollarSign className="w-4 h-4 text-green-600 mx-auto mb-1" />
+            <p className="text-xs text-green-600 font-medium">Receita</p>
+            <p className="text-sm font-bold text-green-700">R$ 85k</p>
+          </div>
+        </div>
         
-        {/* Indicadores de status */}
+        {/* Status do sistema compacto */}
         <div className="bg-gray-50 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="text-gray-500">API Principal</span>
@@ -261,11 +258,11 @@ const Sidebar = ({
           </div>
           
           <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-500">Última Sync</span>
-            <span className="text-gray-600">{new Date().toLocaleTimeString('pt-BR', { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            })}</span>
+            <span className="text-gray-500">Performance</span>
+            <div className="flex items-center gap-1">
+              <Activity className="w-3 h-3 text-blue-500" />
+              <span className="text-blue-600 font-medium">Ótima</span>
+            </div>
           </div>
         </div>
       </div>

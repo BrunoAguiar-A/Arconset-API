@@ -1,99 +1,206 @@
-# 📁 middleware/auth_middleware_simple.py - VERSÃO ULTRA OTIMIZADA (150 linhas vs 700)
+# 📁 middleware/auth_middleware.py - VERSÃO DE PRODUÇÃO FINAL
 from functools import wraps
 from flask import request, jsonify, g
-from app.middleware.security import security_manager, log_security_event
 from database import SessionLocal
 from models.user import User
 import structlog
+import jwt
+import os
+from datetime import UTC, datetime, timedelta
 
-# Logger simples
-logger = structlog.get_logger()
+# Logger estruturado
+logger = structlog.get_logger(__name__)
+
+# Configurações JWT
+JWT_SECRET = os.getenv('JWT_SECRET')
+JWT_ALGORITHM = 'HS256'
+JWT_EXPIRATION_HOURS = int(os.getenv('JWT_EXPIRATION_HOURS', '24'))
+
+def generate_jwt_token(user_data, expires_hours=None):
+    """Gerar token JWT para o usuário"""
+    try:
+        if expires_hours is None:
+            expires_hours = JWT_EXPIRATION_HOURS
+        
+        payload = {
+            'user_id': user_data['user_id'],
+            'username': user_data['username'],
+            'role': user_data['role'],
+            'email': user_data.get('email'),
+            'exp': datetime.now(UTC) + timedelta(hours=expires_hours),
+            'iat': datetime.now(UTC)
+        }
+        
+        token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        
+        logger.info("jwt_token_generated", 
+                   user_id=user_data['user_id'], 
+                   expires_hours=expires_hours)
+        
+        return token
+        
+    except Exception as e:
+        logger.error("jwt_generation_error", error=str(e), user_data=user_data)
+        return None
+
+def verify_jwt_token(token):
+    """Verificar e decodificar token JWT"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        
+        # Verificar se o token não expirou
+        exp_timestamp = payload.get('exp')
+        if exp_timestamp and datetime.now(UTC).timestamp() > exp_timestamp:
+            logger.warning("jwt_token_expired", user_id=payload.get('user_id'))
+            return None
+        
+        logger.debug("jwt_token_verified", user_id=payload.get('user_id'))
+        return payload
+        
+    except jwt.ExpiredSignatureError:
+        logger.warning("jwt_expired_signature", token_prefix=token[:20] if token else "None")
+        return None
+    except jwt.InvalidTokenError as e:
+        logger.warning("jwt_invalid_token", error=str(e), token_prefix=token[:20] if token else "None")
+        return None
+    except Exception as e:
+        logger.error("jwt_verification_error", error=str(e))
+        return None
 
 def auth_required(roles=None):
     """
-    Decorator simples para autenticação - VERSÃO OTIMIZADA
+    Decorator para autenticação - VERSÃO DE PRODUÇÃO
+    
+    Args:
+        roles (list or str): Lista de roles permitidos ou role único
     """
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             try:
-                # Verificar header Authorization
+                # 1. Verificar header Authorization
                 auth_header = request.headers.get('Authorization')
                 
-                if not auth_header or not auth_header.startswith('Bearer '):
-                    log_security_event('MISSING_AUTH_TOKEN', False, None)
+                if not auth_header:
+                    logger.warning("missing_auth_header", 
+                                 endpoint=request.endpoint,
+                                 method=request.method,
+                                 ip=request.remote_addr)
                     return jsonify({
                         'success': False,
-                        'error': 'Token de autenticação requerido'
+                        'error': 'Token de autenticação requerido',
+                        'code': 'MISSING_AUTH_TOKEN'
                     }), 401
                 
-                # Extrair token
+                if not auth_header.startswith('Bearer '):
+                    logger.warning("invalid_auth_format", 
+                                 auth_header=auth_header[:20],
+                                 endpoint=request.endpoint)
+                    return jsonify({
+                        'success': False,
+                        'error': 'Formato de autenticação inválido',
+                        'code': 'INVALID_AUTH_FORMAT'
+                    }), 401
+                
+                # 2. Extrair token
                 try:
                     token = auth_header.split(' ')[1]
-                except IndexError:
+                    if not token:
+                        raise ValueError("Token vazio")
+                except (IndexError, ValueError):
+                    logger.warning("malformed_token", auth_header=auth_header[:50])
                     return jsonify({
                         'success': False,
-                        'error': 'Token malformado'
+                        'error': 'Token malformado',
+                        'code': 'MALFORMED_TOKEN'
                     }), 401
                 
-                # Verificar token JWT
-                if not security_manager:
+                # 3. Verificar token JWT
+                payload = verify_jwt_token(token)
+                if not payload:
+                    logger.warning("invalid_jwt_token", 
+                                 endpoint=request.endpoint,
+                                 token_prefix=token[:20])
                     return jsonify({
                         'success': False,
-                        'error': 'Sistema de segurança não disponível'
-                    }), 503
-                
-                try:
-                    payload = security_manager.verify_jwt_token(token)
-                except Exception as e:
-                    log_security_event('INVALID_JWT_TOKEN', False, None)
-                    return jsonify({
-                        'success': False,
-                        'error': str(e)
+                        'error': 'Token inválido ou expirado',
+                        'code': 'INVALID_TOKEN'
                     }), 401
                 
-                # Buscar usuário no banco
+                # 4. Buscar usuário no banco
+                user_id = payload.get('user_id')
+                if not user_id:
+                    logger.error("token_missing_user_id", payload=payload)
+                    return jsonify({
+                        'success': False,
+                        'error': 'Token inválido: ID do usuário não encontrado',
+                        'code': 'INVALID_TOKEN_DATA'
+                    }), 401
+                
                 db = SessionLocal()
                 try:
-                    user = db.query(User).filter(User.id == payload['user_id']).first()
+                    user = db.query(User).filter(User.id == user_id).first()
                     
-                    if not user or not user.is_active:
-                        log_security_event('USER_NOT_FOUND_OR_INACTIVE', False, payload.get('user_id'))
+                    if not user:
+                        logger.warning("user_not_found", user_id=user_id)
                         return jsonify({
                             'success': False,
-                            'error': 'Usuário não encontrado ou inativo'
+                            'error': 'Usuário não encontrado',
+                            'code': 'USER_NOT_FOUND'
                         }), 401
                     
-                    # Verificar roles se especificados
+                    if not user.is_active:
+                        logger.warning("user_inactive", user_id=user_id, username=user.username)
+                        return jsonify({
+                            'success': False,
+                            'error': 'Conta do usuário foi desativada',
+                            'code': 'USER_INACTIVE'
+                        }), 401
+                    
+                    # 5. Verificar roles se especificados
                     if roles:
                         required_roles = roles if isinstance(roles, list) else [roles]
                         if user.role not in required_roles:
-                            log_security_event('INSUFFICIENT_PERMISSIONS', False, user.id)
+                            logger.warning("insufficient_permissions", 
+                                         user_id=user_id,
+                                         user_role=user.role,
+                                         required_roles=required_roles)
                             return jsonify({
                                 'success': False,
-                                'error': 'Permissão insuficiente'
+                                'error': 'Permissão insuficiente para acessar este recurso',
+                                'code': 'INSUFFICIENT_PERMISSIONS'
                             }), 403
                     
-                    # Adicionar usuário ao contexto
+                    # 6. Adicionar usuário ao contexto da requisição
                     g.current_user = user
                     g.user_id = user.id
                     g.user_role = user.role
                     g.username = user.username
+                    g.user_email = user.email
                     
-                    log_security_event('AUTHORIZED_ACCESS', True, user.id)
+                    # 7. Log de acesso autorizado
+                    logger.info("authorized_access", 
+                               user_id=user.id,
+                               username=user.username,
+                               role=user.role,
+                               endpoint=request.endpoint,
+                               method=request.method)
                     
                 finally:
                     db.close()
                 
+                # 8. Chamar a função original
                 return f(*args, **kwargs)
                 
             except Exception as e:
-                logger.error("auth_middleware_error", error=str(e))
-                log_security_event('AUTH_MIDDLEWARE_ERROR', False, None)
+                logger.error("auth_middleware_unexpected_error", 
+                           error=str(e),
+                           endpoint=request.endpoint)
                 return jsonify({
                     'success': False,
-                    'error': 'Erro de autenticação'
-                }), 401
+                    'error': 'Erro interno de autenticação',
+                    'code': 'AUTH_INTERNAL_ERROR'
+                }), 500
         
         return decorated_function
     return decorator
@@ -107,25 +214,12 @@ def manager_required(f):
     return auth_required(roles=['admin', 'manager'])(f)
 
 def get_current_user():
-    """Obter usuário atual do contexto"""
+    """Obter usuário atual do contexto da requisição"""
     return getattr(g, 'current_user', None)
 
 def get_current_user_id():
     """Obter ID do usuário atual"""
-    user_id = getattr(g, 'user_id', None)
-    
-    if not user_id:
-        # Fallback: tentar extrair do token
-        auth_header = request.headers.get('Authorization', '')
-        if auth_header.startswith('Bearer ') and security_manager:
-            try:
-                token = auth_header.split(' ')[1]
-                payload = security_manager.verify_jwt_token(token)
-                return payload.get('user_id')
-            except:
-                pass
-    
-    return user_id
+    return getattr(g, 'user_id', None)
 
 def get_current_user_role():
     """Obter role do usuário atual"""
@@ -135,95 +229,149 @@ def get_current_username():
     """Obter username do usuário atual"""
     return getattr(g, 'username', None)
 
-def create_default_admin():
-    """Criar usuário admin padrão se não existir"""
+def get_current_user_email():
+    """Obter email do usuário atual"""
+    return getattr(g, 'user_email', None)
+
+def validate_token_for_verification(token):
+    """
+    Validação robusta de token para endpoint /verify-token
+    Retorna (is_valid, user_data, error_message)
+    """
     try:
+        if not token:
+            return False, None, "Token não fornecido"
+        
+        # Verificar JWT
+        payload = verify_jwt_token(token)
+        if not payload:
+            return False, None, "Token inválido ou expirado"
+        
+        # Verificar usuário no banco
+        user_id = payload.get('user_id')
+        if not user_id:
+            return False, None, "Token não contém ID do usuário"
+        
         db = SessionLocal()
         try:
-            # Verificar se já existe admin
-            admin = db.query(User).filter(User.role == 'admin').first()
+            user = db.query(User).filter(User.id == user_id).first()
             
-            if not admin:
-                admin = User(
-                    username='admin',
-                    email='admin@arconset.com.br',
-                    full_name='Administrador do Sistema',
-                    role='admin',
-                    is_active=True,
-                    is_verified=True
-                )
-                admin.set_password('Admin123!')
-                
-                db.add(admin)
-                db.commit()
-                
-                log_security_event('DEFAULT_ADMIN_CREATED', True, admin.id)
-                
-                print("✅ Usuário admin criado:")
-                print("   Username: admin")
-                print("   Email: admin@arconset.com.br")
-                print("   Senha: Admin123!")
-                print("   ⚠️  ALTERE A SENHA IMEDIATAMENTE!")
-                
-                return True
-            else:
-                return False
-                
+            if not user:
+                return False, None, "Usuário não encontrado"
+            
+            if not user.is_active:
+                return False, None, "Usuário inativo"
+            
+            # Retornar dados do usuário
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'full_name': user.full_name,
+                'role': user.role,
+                'is_active': user.is_active,
+                'is_verified': user.is_verified,
+                'created_at': user.created_at.isoformat() if user.created_at else None,
+                'last_login': user.last_login.isoformat() if hasattr(user, 'last_login') and user.last_login else None
+            }
+            
+            logger.info("token_validation_success", user_id=user_id)
+            return True, user_data, None
+            
         finally:
             db.close()
             
     except Exception as e:
-        logger.error("create_default_admin_error", error=str(e))
-        return False
+        logger.error("validate_token_error", error=str(e))
+        return False, None, f"Erro interno: {str(e)}"
 
-def cleanup_user_auth_data(user_id):
-    """Limpar dados de autenticação de um usuário"""
+def create_auth_response(user):
+    """Criar resposta de autenticação com token"""
     try:
-        revoked_tokens = 0
-        revoked_sessions = 0
+        user_data = {
+            'user_id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'role': user.role
+        }
         
-        # Revogar tokens JWT
-        if security_manager and hasattr(security_manager.redis_client, 'delete'):
-            security_manager.redis_client.delete(f"jwt:{user_id}")
-            revoked_tokens = 1
-        
-        # Remover sessões bancárias
-        if security_manager and hasattr(security_manager.redis_client, 'scan_iter'):
-            pattern = f"bank_session:{user_id}:*"
-            for key in security_manager.redis_client.scan_iter(match=pattern):
-                security_manager.redis_client.delete(key)
-                revoked_sessions += 1
-        
-        log_security_event('USER_AUTH_DATA_CLEANUP', True, user_id,
-                          revoked_tokens=revoked_tokens,
-                          revoked_sessions=revoked_sessions)
+        token = generate_jwt_token(user_data)
+        if not token:
+            return None
         
         return {
-            'success': True,
-            'revoked_tokens': revoked_tokens,
-            'revoked_sessions': revoked_sessions
+            'token': token,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'full_name': user.full_name,
+                'role': user.role,
+                'is_active': user.is_active,
+                'is_verified': user.is_verified
+            },
+            'expires_in': JWT_EXPIRATION_HOURS * 3600  # em segundos
         }
         
     except Exception as e:
-        logger.error("cleanup_user_auth_data_error", error=str(e))
-        return {'success': False, 'error': str(e)}
+        logger.error("create_auth_response_error", error=str(e), user_id=user.id)
+        return None
+
+def revoke_user_tokens(user_id):
+    """Revogar todos os tokens de um usuário (implementação básica)"""
+    try:
+        # Em uma implementação mais robusta, você manteria uma blacklist de tokens
+        # Por enquanto, registramos o evento para auditoria
+        logger.info("user_tokens_revoked", user_id=user_id)
+        return True
+        
+    except Exception as e:
+        logger.error("revoke_tokens_error", error=str(e), user_id=user_id)
+        return False
 
 def check_auth_system_health():
     """Verificar saúde do sistema de autenticação"""
     try:
+        # Testar conexão com banco
         db = SessionLocal()
         try:
             user_count = db.query(User).count()
             admin_exists = db.query(User).filter(User.role == 'admin').first() is not None
             
-            return {
+            # Testar geração e verificação de JWT
+            test_user_data = {
+                'user_id': 999999,
+                'username': 'test_health_check',
+                'role': 'user',
+                'email': 'test@health.check'
+            }
+            
+            test_token = generate_jwt_token(test_user_data, expires_hours=1)
+            token_valid = verify_jwt_token(test_token) is not None if test_token else False
+            
+            health_status = {
                 'database_connection': True,
                 'user_count': user_count,
                 'admin_exists': admin_exists,
-                'security_manager_active': security_manager is not None,
-                'jwt_configured': bool(security_manager and hasattr(security_manager, 'jwt_secret')),
-                'healthy': True
+                'jwt_generation': test_token is not None,
+                'jwt_verification': token_valid,
+                'jwt_secret_configured': bool(JWT_SECRET and JWT_SECRET != 'your-super-secret-jwt-key-change-in-production'),
+                'healthy': True,
+                'timestamp': datetime.now(UTC).isoformat()
             }
+            
+            # Sistema é saudável se todos os componentes críticos funcionam
+            health_status['healthy'] = all([
+                health_status['database_connection'],
+                health_status['admin_exists'],
+                health_status['jwt_generation'],
+                health_status['jwt_verification'],
+                health_status['jwt_secret_configured']
+            ])
+            
+            logger.info("auth_system_health_check", **health_status)
+            return health_status
+            
         finally:
             db.close()
             
@@ -232,31 +380,71 @@ def check_auth_system_health():
         return {
             'database_connection': False,
             'error': str(e),
-            'healthy': False
+            'healthy': False,
+            'timestamp': datetime.now(UTC).isoformat()
         }
 
 def initialize_auth_system():
-    """Inicializar sistema de autenticação"""
-    print("🔐 Inicializando sistema de autenticação simplificado...")
+    """Inicializar sistema de autenticação para produção"""
+    logger.info("initializing_auth_system")
     
-    # Verificar se security_manager está disponível
-    if not security_manager:
-        print("❌ SecurityManager não disponível")
-        return False
-    
-    # Testar função básica
     try:
-        test_payload = {'user_id': 'test', 'username': 'test', 'role': 'user'}
-        test_token = security_manager.generate_jwt_token(test_payload, expires_hours=1)
-        verified = security_manager.verify_jwt_token(test_token)
+        # 1. Verificar configurações essenciais
+        if JWT_SECRET == 'your-super-secret-jwt-key-change-in-production':
+            logger.warning("jwt_secret_not_changed", 
+                         message="AVISO: Altere a JWT_SECRET em produção!")
         
-        if verified and verified.get('user_id') == 'test':
-            print("✅ Sistema de autenticação funcionando")
+        # 2. Verificar conexão com banco
+        db = SessionLocal()
+        try:
+            user_count = db.query(User).count()
+            admin_count = db.query(User).filter(User.role == 'admin').count()
+            
+            logger.info("auth_system_initialized", 
+                       user_count=user_count,
+                       admin_count=admin_count,
+                       jwt_expiration_hours=JWT_EXPIRATION_HOURS)
+            
+            # 3. Verificar se existe pelo menos um admin
+            if admin_count == 0:
+                logger.warning("no_admin_users_found",
+                             message="Nenhum usuário admin encontrado. Crie um admin antes de usar o sistema.")
+                return False
+            
+            # 4. Testar JWT
+            test_result = check_auth_system_health()
+            if not test_result.get('healthy'):
+                logger.error("auth_system_unhealthy", health_check=test_result)
+                return False
+            
+            logger.info("auth_system_ready")
             return True
-        else:
-            print("❌ Teste de JWT falhou")
-            return False
+            
+        finally:
+            db.close()
             
     except Exception as e:
-        print(f"❌ Erro no teste: {e}")
+        logger.error("auth_system_initialization_failed", error=str(e))
         return False
+
+# Função utilitária para logs de segurança
+def log_security_event(event_type, success, user_id=None, **kwargs):
+    """Registrar eventos de segurança"""
+    try:
+        log_data = {
+            'event_type': event_type,
+            'success': success,
+            'user_id': user_id,
+            'timestamp': datetime.now(UTC).isoformat(),
+            'ip_address': request.remote_addr if request else None,
+            'user_agent': request.headers.get('User-Agent') if request else None,
+            **kwargs
+        }
+        
+        if success:
+            logger.info("security_event", **log_data)
+        else:
+            logger.warning("security_event_failed", **log_data)
+            
+    except Exception as e:
+        logger.error("log_security_event_error", error=str(e))

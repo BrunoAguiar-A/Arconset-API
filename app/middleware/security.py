@@ -34,7 +34,7 @@ class SimpleSecurityManager:
         password = os.getenv('ENCRYPTION_PASSWORD')
         salt = os.getenv('ENCRYPTION_SALT', 'arconset_salt_2024').encode()
         
-        if not password or len(password) < 16:
+        if not password or len(base64.b64decode(password)) < 16:
             raise ValueError("ENCRYPTION_PASSWORD deve ter pelo menos 16 caracteres")
         
         # PBKDF2 com 100k iterações (balance segurança/performance)

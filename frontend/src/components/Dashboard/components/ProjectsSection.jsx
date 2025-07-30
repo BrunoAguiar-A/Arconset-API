@@ -1,14 +1,14 @@
-// 📁 src/components/Dashboard/components/ProjectsSection.jsx
+// 📁 src/components/Dashboard/components/ProjectsSection.jsx - SEM BOTÕES DUPLICADOS
 import React from 'react';
-import { formatCurrency, formatDate, PROJECT_STATUS_COLORS } from '../utils';
+import { formatCurrency, formatDate } from '../utils';
 import { 
   FolderOpen, 
   MapPin, 
   Calendar, 
   DollarSign, 
-  Plus, 
   Edit, 
-  Trash2 
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 
 const ProjectsSection = ({ 
@@ -16,7 +16,8 @@ const ProjectsSection = ({
   fullView = false, 
   onEdit, 
   onCreate, 
-  onDelete 
+  onDelete,
+  loading = false
 }) => {
 
   const getStatusColor = (status) => {
@@ -31,7 +32,7 @@ const ProjectsSection = ({
   };
 
   const renderProjectCard = (project, showActions = false) => (
-    <div key={project.id} className="border rounded-lg p-4">
+    <div key={project.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-3">
         <div>
           <h3 className="font-semibold text-gray-900">{project.nome}</h3>
@@ -107,22 +108,20 @@ const ProjectsSection = ({
     </div>
   );
 
+  // ✅ VERSÃO COMPLETA - SEM BOTÃO DUPLICADO (gerenciado pelo Dashboard)
   if (fullView) {
     return (
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-gray-900">Projetos/Obras</h1>
-          <button 
-            onClick={onCreate}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Novo Projeto
-          </button>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border">
-          <div className="p-6">
+      <div className="bg-white rounded-lg shadow-sm border">
+        <div className="p-6">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Carregando projetos...</h3>
+                <p className="text-gray-500">Aguarde enquanto buscamos os dados</p>
+              </div>
+            </div>
+          ) : (
             <div className="space-y-6">
               {projects.map(project => renderProjectCard(project, true))}
               
@@ -130,32 +129,43 @@ const ProjectsSection = ({
                 <div className="text-center py-12">
                   <FolderOpen className="w-16 h-16 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-500 text-lg">Nenhum projeto encontrado</p>
-                  <p className="text-gray-400 text-sm">Clique em "Novo Projeto" para começar</p>
+                  <p className="text-gray-400 text-sm">Use o botão "Novo Projeto" no topo da página</p>
                 </div>
               )}
             </div>
-          </div>
+          )}
         </div>
       </div>
     );
   }
 
+  // ✅ VERSÃO RESUMO - SEM BOTÃO DUPLICADO (para dashboard)
   return (
     <div className="bg-white rounded-lg shadow-sm border">
       <div className="p-6 border-b">
-        <h2 className="text-xl font-semibold text-gray-900">Projetos em Andamento</h2>
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-semibold text-gray-900">Projetos em Andamento</h2>
+          {/* ❌ REMOVIDO: Botão pequeno "Novo Projeto" */}
+        </div>
       </div>
       <div className="p-6">
-        <div className="space-y-4">
-          {projects.slice(0, 5).map(project => renderProjectCard(project, false))}
-          
-          {projects.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <FolderOpen className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-              <p>Nenhum projeto encontrado</p>
-            </div>
-          )}
-        </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {projects.slice(0, 5).map(project => renderProjectCard(project, false))}
+            
+            {projects.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <FolderOpen className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p>Nenhum projeto encontrado</p>
+                <p className="text-xs mt-1">Acesse a aba "Projetos" para criar o primeiro</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

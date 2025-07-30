@@ -1,22 +1,6 @@
+// 📁 src/components/Dashboard/components/S3FileUpload.jsx - CORRIGIDO
 import React, { useState, useRef } from 'react';
 import { Upload, X, File, Image, FileText, Archive, AlertCircle, CheckCircle, Loader2, Cloud, HardDrive } from 'lucide-react';
-import S3FileUpload from '../components/S3FileUpload';
-
-function ProjetoPage() {
-  return (
-    <div>
-      <h2>Upload de Arquivos</h2>
-      <S3FileUpload 
-        projetoId={123}
-        tipoDocumento="CAD"
-        onUploadComplete={(arquivo) => {
-          console.log('Arquivo enviado:', arquivo);
-          // Atualizar lista de arquivos
-        }}
-      />
-    </div>
-  );
-}
 
 const S3FileUpload = ({ 
   projetoId = null, 

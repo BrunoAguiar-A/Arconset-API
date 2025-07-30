@@ -1,4 +1,4 @@
-// 📁 BillsSection.jsx - CORRIGIDO
+// 📁 src/components/Dashboard/components/BillsSection.jsx - SEM BOTÕES DUPLICADOS
 import React from 'react';
 import { 
   DollarSign, 
@@ -15,12 +15,15 @@ import {
 } from 'lucide-react';
 import { useSecureBankMonitor } from '../hooks/useSecureBankMonitor';
 import { formatCurrency, formatDate } from '../utils';
+
 const BillsSection = ({ 
   bills = [], 
   onEdit, 
   onPay, 
   onViewAll, 
-  fullView = false 
+  onCreate,
+  fullView = false,
+  loading = false
 }) => {
   // 🎯 Hook para monitor de boletos
   const { 
@@ -33,7 +36,7 @@ const BillsSection = ({
 
   const estatisticasBoletos = getEstatisticas();
 
-  // 🔧 FUNÇÕES CORRIGIDAS
+  // 🔧 FUNÇÕES OTIMIZADAS
   const handleVerificarBoletos = async () => {
     console.log('🔍 Verificando novos boletos...');
     try {
@@ -84,11 +87,15 @@ const BillsSection = ({
 
   const handleNovaConta = () => {
     console.log('➕ Criando nova conta...');
-    // Simular abertura de modal de nova conta
-    alert('📝 Abrindo formulário de nova conta...\n\nFuncionalidade em desenvolvimento!');
+    if (typeof onCreate === 'function') {
+      onCreate();
+    } else {
+      console.error('❌ onCreate não é uma função');
+      alert('📝 Abrindo formulário de nova conta...\n\nFuncionalidade em desenvolvimento!');
+    }
   };
 
-  // 🔧 Copiar código de barras - CORRIGIDO
+  // 🔧 Copiar código de barras
   const copiarCodigoBarras = async (codigo) => {
     console.log('📋 Copiando código de barras...');
     try {
@@ -96,7 +103,6 @@ const BillsSection = ({
         await navigator.clipboard.writeText(codigo);
         alert('✅ Código de barras copiado para área de transferência!');
       } else {
-        // Fallback para navegadores mais antigos
         const textArea = document.createElement('textarea');
         textArea.value = codigo;
         textArea.style.position = 'fixed';
@@ -141,7 +147,7 @@ const BillsSection = ({
     }
   };
 
-  // 🎯 Renderizar card de conta normal - CORRIGIDO
+  // 🎯 Renderizar card de conta normal
   const renderBillCard = (bill, showActions = true) => {
     const isOverdue = bill.status === 'Atrasada' || (bill.dias_vencimento !== null && bill.dias_vencimento < 0);
     const isDueSoon = bill.dias_vencimento !== null && bill.dias_vencimento >= 0 && bill.dias_vencimento <= 3;
@@ -235,7 +241,7 @@ const BillsSection = ({
     );
   };
 
-  // 🎯 Renderizar card de boleto detectado - CORRIGIDO
+  // 🎯 Renderizar card de boleto detectado
   const renderBoletoCard = (boleto) => {
     const hoje = new Date();
     const vencimento = new Date(boleto.dataVencimento);
@@ -262,11 +268,6 @@ const BillsSection = ({
               {boleto.isNovo && (
                 <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full animate-pulse">
                   NOVO!
-                </span>
-              )}
-              {boleto.urgente && (
-                <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-                  URGENTE
                 </span>
               )}
             </div>
@@ -331,7 +332,7 @@ const BillsSection = ({
     );
   };
 
-  // Vista resumida para o dashboard
+  // ✅ VISTA RESUMIDA - SEM BOTÕES DUPLICADOS (para dashboard)
   if (!fullView) {
     const contasPendentes = bills.filter(b => b.status !== 'Paga');
     const boletosPendentes = boletos.filter(b => b.status === 'Pendente');
@@ -349,24 +350,13 @@ const BillsSection = ({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={handleVerificarBoletos}
-                disabled={boletoLoading}
-                className={`p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors ${
-                  boletoLoading ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-                title="Verificar novos boletos"
-              >
-                <RefreshCw className={`w-4 h-4 ${boletoLoading ? 'animate-spin' : ''}`} />
-              </button>
-              <button 
-                onClick={handleViewAll}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-              >
-                Ver todas <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
+            {/* ❌ REMOVIDOS: Botões pequenos de Nova Conta e Verificar Boletos */}
+            <button 
+              onClick={handleViewAll}
+              className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+            >
+              Ver todas <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Status do monitor */}
@@ -379,137 +369,124 @@ const BillsSection = ({
         </div>
         
         <div className="p-6">
-          {/* Alertas de contas/boletos em atraso */}
-          {(contasPendentes.filter(b => b.status === 'Atrasada' || (b.dias_vencimento !== null && b.dias_vencimento < 0)).length > 0 || 
-            boletosPendentes.filter(b => new Date(b.dataVencimento) < new Date()).length > 0) && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-red-600" />
-                <h3 className="font-medium text-red-800">Atenção - Pendências em Atraso!</h3>
-              </div>
-              <p className="text-red-700 mt-1 text-sm">
-                Existem contas e/ou boletos vencidos que precisam de atenção imediata.
-              </p>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
             </div>
-          )}
+          ) : (
+            <>
+              {/* Alertas de contas/boletos em atraso */}
+              {(contasPendentes.filter(b => b.status === 'Atrasada' || (b.dias_vencimento !== null && b.dias_vencimento < 0)).length > 0 || 
+                boletosPendentes.filter(b => new Date(b.dataVencimento) < new Date()).length > 0) && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-600" />
+                    <h3 className="font-medium text-red-800">Atenção - Pendências em Atraso!</h3>
+                  </div>
+                  <p className="text-red-700 mt-1 text-sm">
+                    Existem contas e/ou boletos vencidos que precisam de atenção imediata.
+                  </p>
+                </div>
+              )}
 
-          {/* Lista combinada: Boletos detectados primeiro, depois contas */}
-          <div className="space-y-3">
-            {/* Boletos detectados automaticamente */}
-            {boletosPendentes
-              .sort((a, b) => {
-                const aVencido = new Date(a.dataVencimento) < new Date();
-                const bVencido = new Date(b.dataVencimento) < new Date();
-                if (aVencido && !bVencido) return -1;
-                if (!aVencido && bVencido) return 1;
-                return new Date(a.dataVencimento) - new Date(b.dataVencimento);
-              })
-              .slice(0, 3)
-              .map(boleto => renderBoletoCard(boleto))
-            }
-
-            {/* Contas normais */}
-            {contasPendentes
-              .sort((a, b) => {
-                if (a.status === 'Atrasada' && b.status !== 'Atrasada') return -1;
-                if (b.status === 'Atrasada' && a.status !== 'Atrasada') return 1;
-                if (a.dias_vencimento !== null && b.dias_vencimento !== null) {
-                  return a.dias_vencimento - b.dias_vencimento;
+              {/* Lista combinada: Boletos detectados primeiro, depois contas */}
+              <div className="space-y-3">
+                {/* Boletos detectados automaticamente */}
+                {boletosPendentes
+                  .sort((a, b) => {
+                    const aVencido = new Date(a.dataVencimento) < new Date();
+                    const bVencido = new Date(b.dataVencimento) < new Date();
+                    if (aVencido && !bVencido) return -1;
+                    if (!aVencido && bVencido) return 1;
+                    return new Date(a.dataVencimento) - new Date(b.dataVencimento);
+                  })
+                  .slice(0, 3)
+                  .map(boleto => renderBoletoCard(boleto))
                 }
-                return new Date(a.data_vencimento) - new Date(b.data_vencimento);
-              })
-              .slice(0, 3)
-              .map(bill => renderBillCard(bill, true))
-            }
-            
-            {totalItens === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                <CheckCircle className="w-12 h-12 mx-auto mb-4 text-green-300" />
-                <p className="text-lg font-medium text-green-600">Parabéns!</p>
-                <p className="text-sm">Todas as contas estão em dia</p>
-              </div>
-            )}
 
-            {totalItens > 6 && (
-              <div className="text-center py-4">
-                <button 
-                  onClick={handleViewAll}
-                  className="text-blue-600 hover:text-blue-800 font-medium text-sm"
-                >
-                  + Ver mais {totalItens - 6} itens
-                </button>
-              </div>
-            )}
-          </div>
+                {/* Contas normais */}
+                {contasPendentes
+                  .sort((a, b) => {
+                    if (a.status === 'Atrasada' && b.status !== 'Atrasada') return -1;
+                    if (b.status === 'Atrasada' && a.status !== 'Atrasada') return 1;
+                    if (a.dias_vencimento !== null && b.dias_vencimento !== null) {
+                      return a.dias_vencimento - b.dias_vencimento;
+                    }
+                    return new Date(a.data_vencimento) - new Date(b.data_vencimento);
+                  })
+                  .slice(0, 3)
+                  .map(bill => renderBillCard(bill, true))
+                }
+                
+                {totalItens === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    <CheckCircle className="w-12 h-12 mx-auto mb-4 text-green-300" />
+                    <p className="text-lg font-medium text-green-600">Parabéns!</p>
+                    <p className="text-sm">Todas as contas estão em dia</p>
+                  </div>
+                )}
 
-          {/* Resumo financeiro combinado */}
-          {totalItens > 0 && (
-            <div className="mt-6 pt-4 border-t border-gray-200">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <p className="text-gray-500">Total Contas</p>
-                  <p className="font-bold text-lg text-gray-900">
-                    {formatCurrency(contasPendentes.reduce((sum, bill) => sum + (bill.valor || 0), 0))}
-                  </p>
-                </div>
-                <div className="bg-purple-50 p-3 rounded-lg">
-                  <p className="text-purple-600">Total Boletos</p>
-                  <p className="font-bold text-lg text-purple-700">
-                    {formatCurrency(boletosPendentes.reduce((sum, boleto) => sum + (boleto.valor || 0), 0))}
-                  </p>
-                </div>
-                <div className="bg-orange-50 p-3 rounded-lg">
-                  <p className="text-orange-600">Vence em 7 dias</p>
-                  <p className="font-bold text-lg text-orange-700">
-                    {formatCurrency([...contasPendentes, ...boletosPendentes].filter(item => {
-                      const vencimento = new Date(item.data_vencimento || item.dataVencimento);
-                      const diasRestantes = Math.ceil((vencimento - new Date()) / (1000 * 60 * 60 * 24));
-                      return diasRestantes >= 0 && diasRestantes <= 7;
-                    }).reduce((sum, item) => sum + (item.valor || 0), 0))}
-                  </p>
-                </div>
-                <div className="bg-red-50 p-3 rounded-lg">
-                  <p className="text-red-600">Em Atraso</p>
-                  <p className="font-bold text-lg text-red-700">
-                    {formatCurrency([...contasPendentes, ...boletosPendentes].filter(item => {
-                      const vencimento = new Date(item.data_vencimento || item.dataVencimento);
-                      return vencimento < new Date();
-                    }).reduce((sum, item) => sum + (item.valor || 0), 0))}
-                  </p>
-                </div>
+                {totalItens > 6 && (
+                  <div className="text-center py-4">
+                    <button 
+                      onClick={handleViewAll}
+                      className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                    >
+                      + Ver mais {totalItens - 6} itens
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
+
+              {/* Resumo financeiro combinado */}
+              {totalItens > 0 && (
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-gray-500">Total Contas</p>
+                      <p className="font-bold text-lg text-gray-900">
+                        {formatCurrency(contasPendentes.reduce((sum, bill) => sum + (bill.valor || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-purple-50 p-3 rounded-lg">
+                      <p className="text-purple-600">Total Boletos</p>
+                      <p className="font-bold text-lg text-purple-700">
+                        {formatCurrency(boletosPendentes.reduce((sum, boleto) => sum + (boleto.valor || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-orange-50 p-3 rounded-lg">
+                      <p className="text-orange-600">Vence em 7 dias</p>
+                      <p className="font-bold text-lg text-orange-700">
+                        {formatCurrency([...contasPendentes, ...boletosPendentes].filter(item => {
+                          const vencimento = new Date(item.data_vencimento || item.dataVencimento);
+                          const diasRestantes = Math.ceil((vencimento - new Date()) / (1000 * 60 * 60 * 24));
+                          return diasRestantes >= 0 && diasRestantes <= 7;
+                        }).reduce((sum, item) => sum + (item.valor || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-red-50 p-3 rounded-lg">
+                      <p className="text-red-600">Em Atraso</p>
+                      <p className="font-bold text-lg text-red-700">
+                        {formatCurrency([...contasPendentes, ...boletosPendentes].filter(item => {
+                          const vencimento = new Date(item.data_vencimento || item.dataVencimento);
+                          return vencimento < new Date();
+                        }).reduce((sum, item) => sum + (item.valor || 0), 0))}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
     );
   }
 
-  // Vista completa (caso seja usada em uma página dedicada)
+  // ✅ VISTA COMPLETA - SEM BOTÕES DUPLICADOS (gerenciado pelo Dashboard)
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Contas a Pagar</h1>
-        <div className="flex gap-2">
-          <button 
-            onClick={handleVerificarBoletos}
-            disabled={boletoLoading}
-            className={`bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center gap-2 ${
-              boletoLoading ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            <RefreshCw className={`w-4 h-4 ${boletoLoading ? 'animate-spin' : ''}`} />
-            {boletoLoading ? 'Verificando...' : 'Verificar Boletos'}
-          </button>
-          <button 
-            onClick={handleNovaConta}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2"
-          >
-            <DollarSign className="w-4 h-4" />
-            Nova Conta
-          </button>
-        </div>
-      </div>
+      {/* ❌ REMOVIDO: Header com botões duplicados (gerenciado pelo Dashboard) */}
 
       {/* Seção de Boletos Detectados */}
       {boletos.length > 0 && (
@@ -536,17 +513,27 @@ const BillsSection = ({
           </h2>
         </div>
         <div className="p-6">
-          <div className="space-y-4">
-            {bills.map(bill => renderBillCard(bill, true))}
-            
-            {bills.length === 0 && (
-              <div className="text-center py-12">
-                <DollarSign className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                <p className="text-gray-500 text-lg">Nenhuma conta cadastrada</p>
-                <p className="text-gray-400 text-sm">Clique em "Nova Conta" para adicionar</p>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Carregando contas...</h3>
+                <p className="text-gray-500">Aguarde enquanto buscamos os dados</p>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {bills.map(bill => renderBillCard(bill, true))}
+              
+              {bills.length === 0 && (
+                <div className="text-center py-12">
+                  <DollarSign className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500 text-lg">Nenhuma conta cadastrada</p>
+                  <p className="text-gray-400 text-sm">Use o botão "Nova Conta" no topo da página</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -10,7 +10,8 @@ import re
 from database import SessionLocal
 from models.user import User
 from app.middleware.security import security_manager, log_security_event
-from app.middleware.auth_middleware import auth_required, admin_required, get_current_user_id
+from app.middleware.auth_middleware import auth_required, admin_required, get_current_user_id, validate_token_for_verification
+
 
 # Configurar logger
 logger = structlog.get_logger()
@@ -913,10 +914,17 @@ def delete_user(user_id):
             'error': 'Erro interno do servidor'
         }), 500
 
-# 🔍 GET /api/auth/verify-token - VERIFICAR TOKEN
+# 📁 routes/auth.py - CORREÇÃO DO ENDPOINT VERIFY-TOKEN
+
+# Adicionar esta import no topo do arquivo auth.py:
+from app.middleware.auth_middleware import validate_token_for_verification
+
+# Substituir o endpoint verify-token existente por esta versão corrigida:
+
+# 🔍 GET /api/auth/verify-token - VERIFICAR TOKEN CORRIGIDO
 @auth_bp.route('/verify-token', methods=['GET'])
 def verify_token():
-    """Verificar se token é válido (endpoint público)"""
+    """Verificar se token é válido - VERSÃO CORRIGIDA PARA PRODUÇÃO"""
     try:
         auth_header = request.headers.get('Authorization')
         
@@ -924,43 +932,46 @@ def verify_token():
             return jsonify({
                 'success': False,
                 'valid': False,
-                'error': 'Token não fornecido'
+                'error': 'Token não fornecido ou formato inválido'
             }), 401
         
-        token = auth_header.split(' ')[1]
-        payload = security_manager.verify_jwt_token(token)
-        
-        if payload:
-            # Verificar se usuário ainda existe e está ativo
-            db = SessionLocal()
-            try:
-                user = db.query(User).filter(User.id == payload['user_id']).first()
-                
-                if user and user.is_active:
-                    return jsonify({
-                        'success': True,
-                        'valid': True,
-                        'user': {
-                            'id': user.id,
-                            'username': user.username,
-                            'role': user.role
-                        },
-                        'timestamp': datetime.now(UTC).isoformat()
-                    })
-                else:
-                    return jsonify({
-                        'success': False,
-                        'valid': False,
-                        'error': 'Usuário inativo ou não encontrado'
-                    }), 401
-                    
-            finally:
-                db.close()
-        else:
+        # Extrair token
+        try:
+            token = auth_header.split(' ')[1]
+        except IndexError:
             return jsonify({
                 'success': False,
                 'valid': False,
-                'error': 'Token inválido ou expirado'
+                'error': 'Token malformado'
+            }), 401
+        
+        # Usar função de validação robusta
+        is_valid, user_data, error_message = validate_token_for_verification(token)
+        
+        if is_valid and user_data:
+            log_security_event('TOKEN_VERIFICATION_SUCCESS', True, user_data['id'])
+            
+            return jsonify({
+                'success': True,
+                'valid': True,
+                'user': {
+                    'id': user_data['id'],
+                    'username': user_data['username'],
+                    'email': user_data['email'],
+                    'full_name': user_data['full_name'],
+                    'role': user_data['role'],
+                    'is_active': user_data['is_active'],
+                    'is_verified': user_data['is_verified']
+                },
+                'timestamp': datetime.now(UTC).isoformat()
+            })
+        else:
+            log_security_event('TOKEN_VERIFICATION_FAILED', False, None, error=error_message)
+            
+            return jsonify({
+                'success': False,
+                'valid': False,
+                'error': error_message or 'Token inválido'
             }), 401
         
     except Exception as e:

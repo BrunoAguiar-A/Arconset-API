@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import UTC, datetime, timezone
 import json
+
 
 db = SQLAlchemy()
 
@@ -16,7 +17,7 @@ class Cliente(db.Model):
     cidade = db.Column(db.String(100))
     estado = db.Column(db.String(2))
     cep = db.Column(db.String(10))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(UTC))
     
     # Relacionamentos
     projetos = db.relationship('Projeto', backref='cliente', lazy=True)
@@ -45,17 +46,17 @@ class Projeto(db.Model):
     cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id'), nullable=False)
     valor_total = db.Column(db.Numeric(10, 2))
     valor_pago = db.Column(db.Numeric(10, 2), default=0)
-    progresso = db.Column(db.Integer, default=0)  # 0-100%
-    status = db.Column(db.String(50), default='Orçamento')  # Orçamento, Em Andamento, Finalizado, Cancelado
+    progresso = db.Column(db.Integer, default=0)  
+    status = db.Column(db.String(50), default='Orçamento') 
     data_inicio = db.Column(db.Date)
     data_prazo = db.Column(db.Date)
     data_conclusao = db.Column(db.Date)
     endereco_obra = db.Column(db.Text)
-    tipo_servico = db.Column(db.String(100))  # Instalação, Manutenção, Reparo
-    equipamentos = db.Column(db.Text)  # JSON com lista de equipamentos
+    tipo_servico = db.Column(db.String(100)) 
+    equipamentos = db.Column(db.Text) 
     observacoes = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(UTC))
+    updated_at = db.Column(db.DateTime, default=datetime.now(UTC), onupdate=datetime.now(UTC))
     
     # Relacionamentos
     arquivos = db.relationship('Arquivo', backref='projeto', lazy=True, cascade='all, delete-orphan')
@@ -99,7 +100,7 @@ class Funcionario(db.Model):
     data_admissao = db.Column(db.Date)
     status = db.Column(db.String(20), default='Ativo')  # Ativo, Inativo, Férias
     especialidades = db.Column(db.Text)  # JSON com especialidades técnicas
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(UTC))
     
     # Relacionamentos
     equipe_projeto = db.relationship('EquipeProjeto', backref='funcionario', lazy=True)
@@ -127,7 +128,7 @@ class EquipeProjeto(db.Model):
     projeto_id = db.Column(db.Integer, db.ForeignKey('projetos.id'), nullable=False)
     funcionario_id = db.Column(db.Integer, db.ForeignKey('funcionarios.id'), nullable=False)
     funcao = db.Column(db.String(100))  # Técnico Principal, Assistente, etc.
-    data_entrada = db.Column(db.Date, default=datetime.utcnow().date())
+    data_entrada = db.Column(db.Date, default=lambda: datetime.now(timezone.utc).date())
     data_saida = db.Column(db.Date)
     ativo = db.Column(db.Boolean, default=True)
     
@@ -159,12 +160,12 @@ class Conta(db.Model):
     fornecedor = db.Column(db.String(200))
     numero_documento = db.Column(db.String(50))
     observacoes = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(UTC))
     
     def to_dict(self):
         dias_vencimento = None
         if self.data_vencimento:
-            dias_vencimento = (self.data_vencimento - datetime.now().date()).days
+            dias_vencimento = (self.data_vencimento - datetime.now(UTC).date()).days
         
         return {
             'id': self.id,
@@ -200,7 +201,7 @@ class Arquivo(db.Model):
     tags = db.Column(db.Text)  # JSON com tags para busca
     cloud_url = db.Column(db.String(500))  # URL do arquivo na nuvem
     cloud_id = db.Column(db.String(200))  # ID do arquivo na nuvem
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(UTC))
     
     def to_dict(self):
         return {
@@ -228,7 +229,7 @@ class Notificacao(db.Model):
     lida = db.Column(db.Boolean, default=False)
     projeto_id = db.Column(db.Integer, db.ForeignKey('projetos.id'))
     conta_id = db.Column(db.Integer, db.ForeignKey('contas.id'))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(UTC))
     
     def to_dict(self):
         return {
