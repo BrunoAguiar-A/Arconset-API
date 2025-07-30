@@ -1,4 +1,7 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, Date, DateTime, Numeric, Boolean, ForeignKey
+# database_production.py - VERSÃO 100% PRODUÇÃO
+# ⚠️ SUBSTITUA o arquivo database.py atual por este
+
+from sqlalchemy import create_engine, text, Column, Integer, String, Text, Date, DateTime, Numeric, Boolean, ForeignKey
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime
 import json
@@ -8,26 +11,36 @@ from dotenv import load_dotenv
 # Carregar variáveis de ambiente
 load_dotenv()
 
-# Configuração do PostgreSQL
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://arconsetadm:bruno3982@localhost:5432/arconset_db"
-)
+# ===== CONFIGURAÇÃO PRODUÇÃO - APENAS AWS RDS =====
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Manter compatibilidade com SQLite para desenvolvimento se necessário
-# DATABASE_URL = "sqlite:///./projetos.db"
+if not DATABASE_URL:
+    raise Exception("❌ DATABASE_URL não configurada! Configure no .env")
 
+if "localhost" in DATABASE_URL or "sqlite" in DATABASE_URL:
+    raise Exception("❌ ERRO: Configuração de desenvolvimento detectada em produção!")
+
+print(f"🔗 Conectando ao AWS RDS: {DATABASE_URL.split('@')[1].split('/')[0] if '@' in DATABASE_URL else 'RDS'}")
+
+# ===== ENGINE OTIMIZADO PARA PRODUÇÃO =====
 engine = create_engine(
     DATABASE_URL,
-    echo=False,  # Mudar para True se quiser ver as queries SQL
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    echo=False,  # NUNCA True em produção
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600,
+    pool_pre_ping=True,
+    connect_args={
+        "connect_timeout": 30,
+        "sslmode": "require"
+    }
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Dependency para obter sessão do banco
 def get_db():
+    """Dependency para obter sessão do banco"""
     db = SessionLocal()
     try:
         yield db
@@ -77,14 +90,14 @@ class Projeto(Base):
     cliente_id = Column(Integer, ForeignKey('clientes.id'), nullable=False)
     valor_total = Column(Numeric(10, 2))
     valor_pago = Column(Numeric(10, 2), default=0)
-    progresso = Column(Integer, default=0)  # 0-100%
-    status = Column(String(50), default='Orçamento', index=True)  # Orçamento, Em Andamento, Finalizado, Cancelado
+    progresso = Column(Integer, default=0)
+    status = Column(String(50), default='Orçamento', index=True)
     data_inicio = Column(Date)
     data_prazo = Column(Date)
     data_conclusao = Column(Date)
     endereco_obra = Column(Text)
-    tipo_servico = Column(String(100))  # Instalação, Manutenção, Reparo
-    equipamentos = Column(Text)  # JSON com lista de equipamentos
+    tipo_servico = Column(String(100))
+    equipamentos = Column(Text)
     observacoes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -130,8 +143,8 @@ class Funcionario(Base):
     cargo = Column(String(100))
     salario = Column(Numeric(10, 2))
     data_admissao = Column(Date)
-    status = Column(String(20), default='Ativo', index=True)  # Ativo, Inativo, Férias
-    especialidades = Column(Text)  # JSON com especialidades técnicas
+    status = Column(String(20), default='Ativo', index=True)
+    especialidades = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relacionamentos
@@ -159,7 +172,7 @@ class EquipeProjeto(Base):
     id = Column(Integer, primary_key=True, index=True)
     projeto_id = Column(Integer, ForeignKey('projetos.id'), nullable=False)
     funcionario_id = Column(Integer, ForeignKey('funcionarios.id'), nullable=False)
-    funcao = Column(String(100))  # Técnico Principal, Assistente, etc.
+    funcao = Column(String(100))
     data_entrada = Column(Date, default=datetime.now().date())
     data_saida = Column(Date)
     ativo = Column(Boolean, default=True)
@@ -186,12 +199,12 @@ class Conta(Base):
     id = Column(Integer, primary_key=True, index=True)
     descricao = Column(String(200), nullable=False)
     valor = Column(Numeric(10, 2), nullable=False)
-    tipo = Column(String(50), nullable=False, index=True)  # Fornecedor, Funcionário, Imposto, etc.
-    categoria = Column(String(100), index=True)  # Material, Mão de obra, Transporte, etc.
+    tipo = Column(String(50), nullable=False, index=True)
+    categoria = Column(String(100), index=True)
     data_vencimento = Column(Date, nullable=False, index=True)
     data_pagamento = Column(Date)
-    status = Column(String(20), default='Pendente', index=True)  # Pendente, Paga, Atrasada
-    prioridade = Column(String(20), default='Média', index=True)  # Baixa, Média, Alta, Crítica
+    status = Column(String(20), default='Pendente', index=True)
+    prioridade = Column(String(20), default='Média', index=True)
     projeto_id = Column(Integer, ForeignKey('projetos.id'))
     fornecedor = Column(String(200))
     numero_documento = Column(String(50))
@@ -234,12 +247,12 @@ class Arquivo(Base):
     caminho = Column(String(500), nullable=False)
     tamanho = Column(Integer)
     tipo_mime = Column(String(100))
-    tipo_documento = Column(String(50), index=True)  # Projeto, Contrato, Foto, CAD, etc.
+    tipo_documento = Column(String(50), index=True)
     projeto_id = Column(Integer, ForeignKey('projetos.id'))
     descricao = Column(Text)
-    tags = Column(Text)  # JSON com tags para busca
-    cloud_url = Column(String(500))  # URL do arquivo na nuvem
-    cloud_id = Column(String(200))  # ID do arquivo na nuvem
+    tags = Column(Text)
+    cloud_url = Column(String(500))
+    cloud_id = Column(String(200))
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relacionamentos
@@ -267,7 +280,7 @@ class Notificacao(Base):
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String(200), nullable=False)
     mensagem = Column(Text, nullable=False)
-    tipo = Column(String(50), default='info', index=True)  # info, warning, error, success
+    tipo = Column(String(50), default='info', index=True)
     lida = Column(Boolean, default=False, index=True)
     projeto_id = Column(Integer, ForeignKey('projetos.id'))
     conta_id = Column(Integer, ForeignKey('contas.id'))
@@ -285,90 +298,33 @@ class Notificacao(Base):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
-# ===== FUNÇÕES AUXILIARES =====
-
+# ===== FUNÇÃO PARA CRIAR TABELAS =====
 def create_tables():
     """Criar todas as tabelas no banco de dados"""
     Base.metadata.create_all(bind=engine)
     print("✅ Tabelas criadas com sucesso!")
 
-def insert_sample_data():
-    """Inserir dados de exemplo no banco"""
-    db = SessionLocal()
+# ===== VERIFICAÇÃO DE PRODUÇÃO =====
+def verify_production_config():
+    """Verificar se a configuração está correta para produção"""
+    print("🔍 Verificando configuração de produção...")
+    
+    # Verificar DATABASE_URL
+    if not DATABASE_URL:
+        raise Exception("❌ DATABASE_URL não configurada!")
+    
+    if "localhost" in DATABASE_URL or "sqlite" in DATABASE_URL:
+        raise Exception("❌ Configuração de desenvolvimento detectada!")
+    
+    # Verificar conexão
     try:
-        # Verificar se já existem dados
-        if db.query(Cliente).count() > 0:
-            print("ℹ️  Dados já existem no banco")
-            return
-        
-        print("📝 Inserindo dados de exemplo...")
-        
-        # Clientes de exemplo
-        cliente1 = Cliente(
-            nome='Shopping Center Norte',
-            email='contato@shoppingnorte.com',
-            telefone='(11) 99999-0001',
-            cpf_cnpj='12.345.678/0001-90',
-            endereco='Av. Paulista, 1000',
-            cidade='São Paulo',
-            estado='SP',
-            cep='01310-100'
-        )
-        
-        cliente2 = Cliente(
-            nome='Edifício Comercial Central',
-            email='admin@edificiocentral.com',
-            telefone='(11) 99999-0002',
-            cpf_cnpj='98.765.432/0001-10',
-            endereco='Rua da Consolação, 500',
-            cidade='São Paulo',
-            estado='SP',
-            cep='01302-000'
-        )
-        
-        db.add_all([cliente1, cliente2])
-        db.commit()
-        
-        # Projetos de exemplo
-        from datetime import date, timedelta
-        
-        projeto1 = Projeto(
-            nome='Instalação HVAC Shopping Norte',
-            descricao='Sistema completo de climatização para shopping center',
-            cliente_id=cliente1.id,
-            valor_total=150000.00,
-            valor_pago=75000.00,
-            progresso=75,
-            status='Em Andamento',
-            data_inicio=date.today() - timedelta(days=30),
-            data_prazo=date.today() + timedelta(days=15),
-            endereco_obra='Av. Paulista, 1000 - São Paulo/SP',
-            tipo_servico='Instalação',
-            equipamentos='["Split 60.000 BTUs", "Dutos de ar", "Sistema de exaustão"]'
-        )
-        
-        projeto2 = Projeto(
-            nome='Manutenção Edifício Central',
-            descricao='Manutenção preventiva sistema de ar condicionado',
-            cliente_id=cliente2.id,
-            valor_total=25000.00,
-            valor_pago=0.00,
-            progresso=40,
-            status='Em Andamento',
-            data_inicio=date.today() - timedelta(days=15),
-            data_prazo=date.today() + timedelta(days=30),
-            endereco_obra='Rua da Consolação, 500 - São Paulo/SP',
-            tipo_servico='Manutenção',
-            equipamentos='["Limpeza de filtros", "Verificação elétrica", "Recarga de gás"]'
-        )
-        
-        db.add_all([projeto1, projeto2])
-        db.commit()
-        
-        print("✅ Dados de exemplo inseridos com sucesso!")
-        
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("✅ Conexão com AWS RDS verificada!")
     except Exception as e:
-        print(f"❌ Erro ao inserir dados: {e}")
-        db.rollback()
-    finally:
-        db.close()
+        raise Exception(f"❌ Falha na conexão com AWS RDS: {e}")
+    
+    print("✅ Configuração de produção verificada!")
+
+# Executar verificação na importação
+verify_production_config()
