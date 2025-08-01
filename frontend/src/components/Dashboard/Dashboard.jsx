@@ -1,4 +1,4 @@
-// 📁 src/components/Dashboard/Dashboard.jsx - VERSÃO REFATORADA E ORGANIZADA
+// 📁 src/components/Dashboard/Dashboard.jsx - VERSÃO ATUALIZADA COM MONITOR DE BOLETOS
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { 
@@ -16,7 +16,8 @@ import {
   Building2,
   Users,
   Database,
-  FileText
+  FileText,
+  Zap
 } from 'lucide-react';
 
 // 📋 COMPONENTES ORGANIZADOS
@@ -27,10 +28,12 @@ import BillsSection from './components/BillsSection';
 import Sidebar from './components/Sidebar';
 import Modal from './components/Modal';
 import FilesSection from './components/FilesSection';
-// ✅ ALTERAÇÃO: Mudando de NotificationsSection para NotificationsDropdown
 import NotificationsDropdown from './components/NotificationsDropdown';
 import SettingsModal from './components/SettingsModal';
 import SecureBankConfigPage from './pages/SecureBankConfigPage';
+
+// 🚨 NOVO: Import do Monitor de Boletos
+import BoletoMonitor from './components/BoletoMonitor';
 
 // 🔧 HOOKS OTIMIZADOS
 import { useSecureBankMonitor } from './hooks/useSecureBankMonitor';
@@ -99,7 +102,13 @@ const Dashboard = () => {
     getEstatisticas,
     bancosConfigurados = {},
     isSecure = false,
-    userBankProfile
+    userBankProfile,
+    // 🚨 NOVAS FUNÇÕES PARA O MONITOR
+    manualInit,
+    resetMonitor,
+    hasConfiguredBanks,
+    totalBanks,
+    activeBanks
   } = useSecureBankMonitor();
 
   // 🔧 REFERENCIAS PARA CONTROLE
@@ -117,6 +126,7 @@ const Dashboard = () => {
         total: 0,
         pendentes: 0,
         urgentes: 0,
+        vencidos: 0,
         valorTotal: 0,
         porBanco: { bradesco: 0, itau: 0, bb: 0 }
       };
@@ -236,6 +246,18 @@ const Dashboard = () => {
       setIsRefreshing(false);
     }
   }, [checkSystemHealth, addSecurityAlert, isAdmin]);
+
+  // 🚨 NOVA FUNÇÃO: Inicializar Monitor de Boletos
+  const initializeBoletoMonitor = useCallback(async () => {
+    try {
+      addSecurityAlert('info', 'Inicializando monitor de boletos...');
+      await manualInit();
+      addSecurityAlert('success', 'Monitor de boletos inicializado');
+    } catch (error) {
+      console.error('Erro ao inicializar monitor:', error);
+      addSecurityAlert('error', 'Erro ao inicializar monitor de boletos');
+    }
+  }, [manualInit, addSecurityAlert]);
 
   // 🔐 INICIALIZAÇÃO DE PRODUÇÃO
   useEffect(() => {
@@ -357,6 +379,11 @@ const Dashboard = () => {
       console.log('🔄 Refresh manual iniciado');
       await loadData();
       
+      // 🚨 NOVO: Também atualizar boletos se estivermos na aba do monitor
+      if (activeTab === 'boleto-monitor') {
+        await verificarTodosBoletos();
+      }
+      
       addSecurityAlert('success', 'Dados atualizados com sucesso');
     } catch (error) {
       console.error('Erro no refresh:', error);
@@ -364,7 +391,7 @@ const Dashboard = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, loadData, clearError, updateActivity, addSecurityAlert]);
+  }, [isRefreshing, loadData, clearError, updateActivity, addSecurityAlert, activeTab, verificarTodosBoletos]);
 
   // 🛠️ REQUISIÇÕES SEGURAS
   const handleSecureRequest = useCallback(async (url, options = {}) => {
@@ -412,7 +439,7 @@ const Dashboard = () => {
     }
   }, [updateActivity, addSecurityAlert, handleSecureLogout]);
 
-  // 🛠️ FUNÇÕES CRUD
+  // 🛠️ FUNÇÕES CRUD (mantidas iguais)
   const handleCreateItem = useCallback(async (type, itemData) => {
     try {
       let endpoint = '';
@@ -772,20 +799,31 @@ const Dashboard = () => {
           </div>
         );
 
+      // 🚨 NOVO CASE: Monitor de Boletos
       case 'boleto-monitor':
         return (
-          <div className="bg-white rounded-lg shadow-sm border">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                <Building2 className="w-6 h-6 text-purple-600" />
-                Monitor de Boletos
-              </h1>
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
             </div>
-            <div className="p-6 text-center py-12">
-              <Database className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Monitor Bancário Completo</h3>
-              <p className="text-gray-600">Funcionalidade em desenvolvimento para produção</p>
-            </div>
+            
+            {/* Renderizar o componente BoletoMonitor */}
+            <BoletoMonitor 
+              boletos={boletosBancarios}
+              loading={loadingBoletos}
+              error={errorBoletos}
+              ultimaVerificacao={ultimaVerificacao}
+              statusBancos={statusBancos}
+              bancosConfigurados={bancosConfigurados}
+              estatisticas={estatisticasBoletos}
+              onVerificarBoletos={verificarTodosBoletos}
+              onCopiarCodigo={copiarCodigoBarras}
+              onConfigureBanks={() => setActiveTab('bank-config')}
+              userBankProfile={userBankProfile}
+              isSecure={isSecure}
+              hasConfiguredBanks={hasConfiguredBanks}
+              activeBanks={activeBanks}
+              totalBanks={totalBanks}
+            />
           </div>
         );
 
@@ -798,8 +836,8 @@ const Dashboard = () => {
             <div className="flex justify-between items-center">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-purple-600" />
+                  <div className="w-10 h-10 bg-cyan-100 rounded-lg flex items-center justify-center">
+                    <FileText className="w-6 h-6 text-cyan-600" />
                   </div>
                   📁 Arquivos
                 </h1>
@@ -812,7 +850,7 @@ const Dashboard = () => {
                   // Implementar upload de arquivos
                   alert('Funcionalidade de upload em desenvolvimento');
                 }}
-                className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+                className="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
               >
                 <FileText className="w-5 h-5" />
                 Upload Arquivo
@@ -892,6 +930,7 @@ const Dashboard = () => {
               className={`p-3 rounded-lg shadow-lg border animate-slide-in ${
                 alert.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
                 alert.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+                alert.type === 'info' ? 'bg-blue-50 border-blue-200 text-blue-800' :
                 'bg-yellow-50 border-yellow-200 text-yellow-800'
               }`}
             >
@@ -899,6 +938,7 @@ const Dashboard = () => {
                 <div className="flex-shrink-0 mt-0.5">
                   {alert.type === 'success' ? <CheckCircle className="w-4 h-4" /> :
                    alert.type === 'error' ? <XCircle className="w-4 h-4" /> :
+                   alert.type === 'info' ? <Shield className="w-4 h-4" /> :
                    <AlertTriangle className="w-4 h-4" />}
                 </div>
                 <div className="flex-1">
@@ -919,7 +959,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* 📁 SIDEBAR */}
+      {/* 📁 SIDEBAR ATUALIZADA */}
       <Sidebar 
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -929,6 +969,13 @@ const Dashboard = () => {
         isAdmin={isAdmin}
         isManager={isManager}
         isRefreshing={isRefreshing}
+        // 🚨 NOVAS PROPS PARA BOLETOS
+        boletoStats={{
+          total: estatisticasBoletos.total,
+          urgentes: estatisticasBoletos.urgentes,
+          hasConfigured: hasConfiguredBanks,
+          activeBanks: activeBanks
+        }}
       />
 
       {/* 📋 CONTEÚDO PRINCIPAL */}
@@ -947,6 +994,12 @@ const Dashboard = () => {
                   <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">
                     🔐 SEGURO
                   </span>
+                  {/* 🚨 NOVO: Badge para boletos */}
+                  {activeTab === 'boleto-monitor' && estatisticasBoletos.total > 0 && (
+                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-medium">
+                      🏦 {estatisticasBoletos.total} boletos
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="h-6 w-px bg-gray-300"></div>
@@ -1007,7 +1060,7 @@ const Dashboard = () => {
                   </button>
                 )}
                 
-                {/* ✅ ALTERAÇÃO: NOTIFICAÇÕES COM DROPDOWN */}
+                {/* NOTIFICAÇÕES COM DROPDOWN */}
                 <div className="relative">
                   <button 
                     onClick={() => setShowNotificationsModal(!showNotificationsModal)}
@@ -1113,19 +1166,8 @@ const Dashboard = () => {
         user={user}
       />
 
-      {/* CSS PARA ANIMAÇÕES */}
-      <style jsx>{`
-        @keyframes slide-in {
-          from { transform: translateX(100%); opacity: 0; }
-          to { transform: translateX(0); opacity: 1; }
-        }
-        
-        .animate-slide-in {
-          animation: slide-in 0.3s ease-out;
-        }
-      `}</style>
     </div>
-  );
+  );  
 };
 
 export default Dashboard;

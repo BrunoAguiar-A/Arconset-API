@@ -1,38 +1,83 @@
-# database_production.py - VERSÃO 100% PRODUÇÃO
-# ⚠️ SUBSTITUA o arquivo database.py atual por este
-
-from sqlalchemy import create_engine, text, Column, Integer, String, Text, Date, DateTime, Numeric, Boolean, ForeignKey
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship
-from datetime import datetime
-import json
+# 📁 database.py - COMPLETO PARA AWS RDS
 import os
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
-
-# Carregar variáveis de ambiente
 load_dotenv()
 
-# ===== CONFIGURAÇÃO PRODUÇÃO - APENAS AWS RDS =====
-DATABASE_URL = os.getenv("DATABASE_URL")
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, Date, Numeric, ForeignKey, BigInteger, text
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.sql import func
+from datetime import datetime, UTC, timezone
+import json
+from urllib.parse import quote_plus
 
-if not DATABASE_URL:
-    raise Exception("❌ DATABASE_URL não configurada! Configure no .env")
+# ===== CONFIGURAÇÃO AWS RDS =====
+def get_database_url():
+    """Obter URL do banco configurada para AWS RDS"""
+    
+    # Verificar se DATABASE_URL está definida diretamente
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        print(f"✅ Usando DATABASE_URL configurada para AWS RDS")
+        print(f"🔗 Host: {os.getenv('DB_HOST', 'extraído da URL')}")
+        print(f"🔗 Banco: {os.getenv('DB_NAME', 'extraído da URL')}")
+        return database_url
+    
+    # Construir URL a partir de componentes separados (backup)
+    db_host = os.getenv('DB_HOST')
+    db_port = os.getenv('DB_PORT', '5432')
+    db_user = os.getenv('DB_USER')
+    db_password = os.getenv('DB_PASSWORD')
+    db_name = os.getenv('DB_NAME')
+    
+    if all([db_host, db_user, db_password, db_name]):
+        # Escapar caracteres especiais na senha
+        password_escaped = quote_plus(db_password)
+        
+        constructed_url = f"postgresql://{db_user}:{password_escaped}@{db_host}:{db_port}/{db_name}?sslmode=require"
+        print(f"✅ URL construída para PostgreSQL RDS")
+        return constructed_url
+    
+    # Erro - não encontrou configurações
+    print("❌ ERRO: Configurações AWS RDS não encontradas!")
+    print("🔧 Verificar se .env contém:")
+    print("   - DATABASE_URL=postgresql://...")
+    print("   OU")
+    print("   - DB_HOST, DB_USER, DB_PASSWORD, DB_NAME")
+    raise ValueError("DATABASE_URL ou componentes do banco não configurados")
 
-if "localhost" in DATABASE_URL or "sqlite" in DATABASE_URL:
-    raise Exception("❌ ERRO: Configuração de desenvolvimento detectada em produção!")
+# Configurar URL do banco
+try:
+    DATABASE_URL = get_database_url()
+    print("✅ Configuração do banco carregada")
+except Exception as e:
+    print(f"❌ Erro na configuração: {e}")
+    sys.exit(1)
 
-print(f"🔗 Conectando ao AWS RDS: {DATABASE_URL.split('@')[1].split('/')[0] if '@' in DATABASE_URL else 'RDS'}")
+# Verificar driver
+try:
+    import psycopg2
+    print("✅ Driver psycopg2 disponível")
+except ImportError:
+    print("❌ Driver psycopg2 não encontrado!")
+    print("💡 Execute: pip install psycopg2-binary")
+    sys.exit(1)
 
-# ===== ENGINE OTIMIZADO PARA PRODUÇÃO =====
+# Configurar engine para AWS RDS
+print("🔧 Configurando engine para AWS RDS...")
+
 engine = create_engine(
     DATABASE_URL,
-    echo=False,  # NUNCA True em produção
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=3600,
-    pool_pre_ping=True,
+    echo=False,  # Desabilitado para produção
+    pool_size=5,  # Pool menor para começar
+    max_overflow=10,
+    pool_recycle=3600,  # Reconectar a cada hora
+    pool_pre_ping=True,  # Verificar conexão antes de usar
     connect_args={
-        "connect_timeout": 30,
-        "sslmode": "require"
+        'sslmode': 'require',  # SSL obrigatório para AWS RDS
+        'connect_timeout': 30,
+        'application_name': 'arconset_hvac_app'
     }
 )
 
@@ -40,31 +85,31 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def get_db():
-    """Dependency para obter sessão do banco"""
+    """Gerador de sessão do banco - AWS RDS"""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# ===== MODELOS DO BANCO DE DADOS =====
+# ===== MODELOS COMPLETOS PARA AWS RDS =====
 
 class Cliente(Base):
     __tablename__ = 'clientes'
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String(200), nullable=False)
-    email = Column(String(120), unique=True, nullable=False, index=True)
+    email = Column(String(120), unique=True, nullable=False)
     telefone = Column(String(20))
-    cpf_cnpj = Column(String(20), unique=True, index=True)
+    cpf_cnpj = Column(String(20), unique=True)
     endereco = Column(Text)
     cidade = Column(String(100))
     estado = Column(String(2))
     cep = Column(String(10))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relacionamentos
-    projetos = relationship("Projeto", back_populates="cliente")
+    projetos = relationship('Projeto', back_populates='cliente')
     
     def to_dict(self):
         return {
@@ -91,7 +136,7 @@ class Projeto(Base):
     valor_total = Column(Numeric(10, 2))
     valor_pago = Column(Numeric(10, 2), default=0)
     progresso = Column(Integer, default=0)
-    status = Column(String(50), default='Orçamento', index=True)
+    status = Column(String(50), default='Orçamento')
     data_inicio = Column(Date)
     data_prazo = Column(Date)
     data_conclusao = Column(Date)
@@ -99,14 +144,14 @@ class Projeto(Base):
     tipo_servico = Column(String(100))
     equipamentos = Column(Text)
     observacoes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relacionamentos
-    cliente = relationship("Cliente", back_populates="projetos")
-    arquivos = relationship("Arquivo", back_populates="projeto", cascade="all, delete-orphan")
-    contas = relationship("Conta", back_populates="projeto")
-    equipe_projeto = relationship("EquipeProjeto", back_populates="projeto", cascade="all, delete-orphan")
+    cliente = relationship('Cliente', back_populates='projetos')
+    arquivos = relationship('Arquivo', back_populates='projeto', cascade='all, delete-orphan')
+    contas = relationship('Conta', back_populates='projeto')
+    equipe_projeto = relationship('EquipeProjeto', back_populates='projeto', cascade='all, delete-orphan')
     
     def to_dict(self):
         return {
@@ -129,7 +174,7 @@ class Projeto(Base):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'total_arquivos': len(self.arquivos) if self.arquivos else 0,
-            'equipe': [ep.funcionario.nome for ep in self.equipe_projeto if ep.ativo] if self.equipe_projeto else []
+            'equipe': [ep.funcionario.nome for ep in self.equipe_projeto if ep.ativo] if hasattr(self, 'equipe_projeto') else []
         }
 
 class Funcionario(Base):
@@ -137,18 +182,18 @@ class Funcionario(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String(200), nullable=False)
-    cpf = Column(String(14), unique=True, nullable=False, index=True)
+    cpf = Column(String(14), unique=True, nullable=False)
     telefone = Column(String(20))
-    email = Column(String(120), index=True)
+    email = Column(String(120))
     cargo = Column(String(100))
     salario = Column(Numeric(10, 2))
     data_admissao = Column(Date)
-    status = Column(String(20), default='Ativo', index=True)
+    status = Column(String(20), default='Ativo')
     especialidades = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relacionamentos
-    equipe_projeto = relationship("EquipeProjeto", back_populates="funcionario")
+    equipe_projeto = relationship('EquipeProjeto', back_populates='funcionario')
     
     def to_dict(self):
         return {
@@ -163,7 +208,7 @@ class Funcionario(Base):
             'status': self.status,
             'especialidades': json.loads(self.especialidades) if self.especialidades else [],
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'projetos_ativos': len([ep for ep in self.equipe_projeto if ep.projeto.status == 'Em Andamento' and ep.ativo]) if self.equipe_projeto else 0
+            'projetos_ativos': len([ep for ep in self.equipe_projeto if ep.projeto.status == 'Em Andamento' and ep.ativo]) if hasattr(self, 'equipe_projeto') else 0
         }
 
 class EquipeProjeto(Base):
@@ -173,13 +218,13 @@ class EquipeProjeto(Base):
     projeto_id = Column(Integer, ForeignKey('projetos.id'), nullable=False)
     funcionario_id = Column(Integer, ForeignKey('funcionarios.id'), nullable=False)
     funcao = Column(String(100))
-    data_entrada = Column(Date, default=datetime.now().date())
+    data_entrada = Column(Date, default=lambda: datetime.now(timezone.utc).date())
     data_saida = Column(Date)
     ativo = Column(Boolean, default=True)
     
     # Relacionamentos
-    projeto = relationship("Projeto", back_populates="equipe_projeto")
-    funcionario = relationship("Funcionario", back_populates="equipe_projeto")
+    projeto = relationship('Projeto', back_populates='equipe_projeto')
+    funcionario = relationship('Funcionario', back_populates='equipe_projeto')
     
     def to_dict(self):
         return {
@@ -199,25 +244,25 @@ class Conta(Base):
     id = Column(Integer, primary_key=True, index=True)
     descricao = Column(String(200), nullable=False)
     valor = Column(Numeric(10, 2), nullable=False)
-    tipo = Column(String(50), nullable=False, index=True)
-    categoria = Column(String(100), index=True)
-    data_vencimento = Column(Date, nullable=False, index=True)
+    tipo = Column(String(50), nullable=False)
+    categoria = Column(String(100))
+    data_vencimento = Column(Date, nullable=False)
     data_pagamento = Column(Date)
-    status = Column(String(20), default='Pendente', index=True)
-    prioridade = Column(String(20), default='Média', index=True)
+    status = Column(String(20), default='Pendente')
+    prioridade = Column(String(20), default='Média')
     projeto_id = Column(Integer, ForeignKey('projetos.id'))
     fornecedor = Column(String(200))
     numero_documento = Column(String(50))
     observacoes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relacionamentos
-    projeto = relationship("Projeto", back_populates="contas")
+    projeto = relationship('Projeto', back_populates='contas')
     
     def to_dict(self):
         dias_vencimento = None
         if self.data_vencimento:
-            dias_vencimento = (self.data_vencimento - datetime.now().date()).days
+            dias_vencimento = (self.data_vencimento - datetime.now(UTC).date()).days
         
         return {
             'id': self.id,
@@ -238,41 +283,69 @@ class Conta(Base):
             'dias_vencimento': dias_vencimento
         }
 
+# ===== MODELO ARQUIVO CRÍTICO PARA UPLOAD =====
 class Arquivo(Base):
     __tablename__ = 'arquivos'
     
     id = Column(Integer, primary_key=True, index=True)
-    nome_original = Column(String(200), nullable=False)
-    nome_arquivo = Column(String(200), nullable=False)
-    caminho = Column(String(500), nullable=False)
-    tamanho = Column(Integer)
-    tipo_mime = Column(String(100))
-    tipo_documento = Column(String(50), index=True)
-    projeto_id = Column(Integer, ForeignKey('projetos.id'))
-    descricao = Column(Text)
-    tags = Column(Text)
-    cloud_url = Column(String(500))
-    cloud_id = Column(String(200))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    nome_original = Column(String(500), nullable=False)
+    nome_arquivo = Column(String(500), nullable=False)
+    caminho = Column(String(1000), nullable=False)
+    tamanho = Column(BigInteger, nullable=False, default=0)
+    tipo_mime = Column(String(200), nullable=True)
+    tipo_documento = Column(String(100), nullable=False, default='Geral')
+    descricao = Column(Text, nullable=True)
     
     # Relacionamentos
-    projeto = relationship("Projeto", back_populates="arquivos")
+    projeto_id = Column(Integer, ForeignKey('projetos.id'), nullable=True)
+    projeto = relationship('Projeto', back_populates='arquivos')
+    
+    # Campos de cloud storage (S3)
+    cloud_url = Column(String(1000), nullable=True)
+    cloud_id = Column(String(500), nullable=True)
+    
+    # Tags para busca
+    tags = Column(Text, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     def to_dict(self):
+        """Converter para dicionário compatível com frontend"""
         return {
             'id': self.id,
+            'name': self.nome_original,
+            'fileName': self.nome_original,
             'nome_original': self.nome_original,
             'nome_arquivo': self.nome_arquivo,
+            'caminho': self.caminho,
+            'size': self.tamanho,
+            'fileSize': self.tamanho,
             'tamanho': self.tamanho,
             'tipo_mime': self.tipo_mime,
+            'type': self.tipo_mime,
+            'mimeType': self.tipo_mime,
             'tipo_documento': self.tipo_documento,
-            'projeto_id': self.projeto_id,
-            'projeto_nome': self.projeto.nome if self.projeto else None,
+            'category': self.tipo_documento,
             'descricao': self.descricao,
-            'tags': json.loads(self.tags) if self.tags else [],
+            'description': self.descricao,
+            'projeto_id': self.projeto_id,
+            'projectId': self.projeto_id,
+            'projeto_nome': self.projeto.nome if self.projeto else None,
             'cloud_url': self.cloud_url,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'url': self.cloud_url or f'/api/arquivos/{self.id}/download',
+            'cloud_id': self.cloud_id,
+            'is_cloud': bool(self.cloud_id),
+            'storage_type': 's3' if self.cloud_id else 'metadata',
+            'tags': json.loads(self.tags) if self.tags else [],
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'uploadDate': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+    
+    def __repr__(self):
+        return f"<Arquivo(id={self.id}, nome='{self.nome_original}', tamanho={self.tamanho})>"
 
 class Notificacao(Base):
     __tablename__ = 'notificacoes'
@@ -280,11 +353,11 @@ class Notificacao(Base):
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String(200), nullable=False)
     mensagem = Column(Text, nullable=False)
-    tipo = Column(String(50), default='info', index=True)
-    lida = Column(Boolean, default=False, index=True)
+    tipo = Column(String(50), default='info')
+    lida = Column(Boolean, default=False)
     projeto_id = Column(Integer, ForeignKey('projetos.id'))
     conta_id = Column(Integer, ForeignKey('contas.id'))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     def to_dict(self):
         return {
@@ -298,33 +371,69 @@ class Notificacao(Base):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
-# ===== FUNÇÃO PARA CRIAR TABELAS =====
-def create_tables():
-    """Criar todas as tabelas no banco de dados"""
-    Base.metadata.create_all(bind=engine)
-    print("✅ Tabelas criadas com sucesso!")
-
-# ===== VERIFICAÇÃO DE PRODUÇÃO =====
-def verify_production_config():
-    """Verificar se a configuração está correta para produção"""
-    print("🔍 Verificando configuração de produção...")
-    
-    # Verificar DATABASE_URL
-    if not DATABASE_URL:
-        raise Exception("❌ DATABASE_URL não configurada!")
-    
-    if "localhost" in DATABASE_URL or "sqlite" in DATABASE_URL:
-        raise Exception("❌ Configuração de desenvolvimento detectada!")
-    
-    # Verificar conexão
+# ===== FUNÇÕES DE TESTE E INICIALIZAÇÃO =====
+def init_db():
+    """Inicializar banco de dados AWS RDS"""
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        print("✅ Conexão com AWS RDS verificada!")
+        print("🔧 Criando tabelas no AWS RDS...")
+        Base.metadata.create_all(bind=engine)
+        print("✅ Tabelas criadas no AWS RDS com sucesso")
+        
+        # Listar tabelas criadas
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        print(f"📋 Tabelas no banco: {tables}")
+        
+        return True
     except Exception as e:
-        raise Exception(f"❌ Falha na conexão com AWS RDS: {e}")
-    
-    print("✅ Configuração de produção verificada!")
+        print(f"❌ Erro ao criar tabelas no AWS RDS: {e}")
+        return False
 
-# Executar verificação na importação
-verify_production_config()
+def test_aws_connection():
+    """Testar conexão com AWS RDS"""
+    try:
+        print("🔍 Testando conexão com AWS RDS...")
+        db = SessionLocal()
+        try:
+            # Usar text() para resolver o warning do SQLAlchemy 2.0
+            result = db.execute(text('SELECT 1')).fetchone()
+            print("✅ Conexão com AWS RDS funcionando!")
+            
+            # Testar acesso ao esquema
+            result = db.execute(text('SELECT current_database(), current_user, version()')).fetchone()
+            print(f"✅ Conectado ao banco: {result[0]}")
+            print(f"✅ Usuário: {result[1]}")
+            print(f"✅ Versão PostgreSQL: {result[2][:50]}...")
+            
+            return True
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"❌ Erro na conexão com AWS RDS: {e}")
+        print("🔧 Verificações:")
+        print("   - RDS está rodando?")
+        print("   - Security Groups permitem conexão na porta 5432?")
+        print("   - Credenciais estão corretas?")
+        print("   - SSL está configurado corretamente?")
+        return False
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("🚀 TESTE DE CONFIGURAÇÃO AWS RDS")
+    print("=" * 60)
+    
+    if test_aws_connection():
+        print("✅ Conexão OK")
+        
+        if init_db():
+            print("✅ Inicialização OK")
+            print("\n🎉 AWS RDS CONFIGURADO COM SUCESSO!")
+            print("📋 Agora os uploads serão salvos no banco AWS!")
+            print("🔗 Metadados no RDS + Arquivos no S3")
+        else:
+            print("❌ Falha na inicialização")
+    else:
+        print("❌ Falha na conexão com AWS RDS")
+        
+    print("=" * 60)

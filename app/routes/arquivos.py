@@ -1,495 +1,534 @@
-# routes/arquivos.py
+# 🔧 routes/arquivos.py - VERSÃO FINAL CORRIGIDA E COMPLETA
 from flask import Blueprint, request, jsonify, send_file
 from werkzeug.utils import secure_filename
-from database import get_db, Arquivo, Projeto
+from database import SessionLocal, Arquivo, Projeto
+from sqlalchemy import func  # ✅ IMPORT CRÍTICO CORRIGIDO
 from datetime import datetime
 import os
-import uuid
-from config.aws_s3 import s3_manager
+import mimetypes
+from pathlib import Path
 
 arquivos_bp = Blueprint('arquivos', __name__)
 
 # Configurações
-UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+UPLOAD_FOLDER = 'uploads'
+MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 ALLOWED_EXTENSIONS = {
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff',
-    '.dwg', '.dxf', '.skp', '.rvt',
-    '.zip', '.rar', '.7z', '.txt', '.csv'
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+    'txt', 'jpg', 'jpeg', 'png', 'gif', 'zip', 'rar'
 }
 
+# Criar pasta de uploads se não existir
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 def allowed_file(filename):
-    """Verificar se extensão é permitida"""
-    return '.' in filename and \
-           os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
+    """Verificar se o arquivo é permitido"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def save_file_local(file, projeto_id=None):
-    """Salvar arquivo localmente (método original)"""
-    if file.filename == '':
-        return None
+def get_file_type(filename):
+    """Determinar tipo do documento baseado na extensão"""
+    ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
     
-    if not allowed_file(file.filename):
-        return None
-    
-    # Criar pasta se não existir
-    upload_dir = UPLOAD_FOLDER
-    if projeto_id:
-        upload_dir = os.path.join(UPLOAD_FOLDER, f'projeto_{projeto_id}')
-    
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    # Nome único para o arquivo
-    filename = secure_filename(file.filename)
-    unique_filename = f"{uuid.uuid4().hex}_{filename}"
-    file_path = os.path.join(upload_dir, unique_filename)
-    
-    # Salvar arquivo
-    file.save(file_path)
-    
-    return {
-        'caminho': file_path,
-        'nome_arquivo': unique_filename,
-        'tamanho': os.path.getsize(file_path)
+    type_mapping = {
+        'pdf': 'PDF',
+        'doc': 'Documento', 'docx': 'Documento',
+        'xls': 'Planilha', 'xlsx': 'Planilha',
+        'ppt': 'Apresentação', 'pptx': 'Apresentação',
+        'txt': 'Texto',
+        'jpg': 'Imagem', 'jpeg': 'Imagem', 'png': 'Imagem', 'gif': 'Imagem',
+        'zip': 'Arquivo', 'rar': 'Arquivo'
     }
+    
+    return type_mapping.get(ext, 'Geral')
 
-@arquivos_bp.route('/api/arquivos/upload-url', methods=['POST'])
-def get_upload_url():
-    """
-    Obter URL para upload (S3 ou local)
-    """
+@arquivos_bp.route('/api/arquivos', methods=['GET'])
+def listar_arquivos():
+    """Listar todos os arquivos - VERSÃO CORRIGIDA"""
+    db = SessionLocal()
     try:
-        data = request.get_json()
+        print("🔄 Listando arquivos...")
         
-        if not data or not data.get('fileName'):
-            return jsonify({
-                'success': False,
-                'error': 'Nome do arquivo é obrigatório'
-            }), 400
+        # Parâmetros de filtro
+        projeto_id = request.args.get('projeto_id', type=int)
+        tipo_documento = request.args.get('tipo_documento')
+        limit = request.args.get('limit', 50, type=int)
         
-        filename = data['fileName']
-        content_type = data.get('contentType', 'application/octet-stream')
-        projeto_id = data.get('projetoId')
-        file_size = data.get('fileSize', 0)
+        # Query base
+        query = db.query(Arquivo)
         
-        # Validações
-        if file_size > MAX_FILE_SIZE:
-            return jsonify({
-                'success': False,
-                'error': f'Arquivo muito grande. Máximo: {MAX_FILE_SIZE // (1024*1024)}MB'
-            }), 400
-        
-        if not allowed_file(filename):
-            return jsonify({
-                'success': False,
-                'error': 'Tipo de arquivo não permitido'
-            }), 400
-        
-        # Verificar se projeto existe
+        # Aplicar filtros
         if projeto_id:
-            db = next(get_db())
+            query = query.filter(Arquivo.projeto_id == projeto_id)
+            print(f"🔍 Filtro por projeto: {projeto_id}")
+        
+        if tipo_documento:
+            query = query.filter(Arquivo.tipo_documento == tipo_documento)
+            print(f"🔍 Filtro por tipo: {tipo_documento}")
+        
+        # Ordenar e limitar
+        arquivos = query.order_by(Arquivo.created_at.desc()).limit(limit).all()
+        print(f"📄 Encontrados {len(arquivos)} arquivo(s)")
+        
+        # Converter para dict
+        arquivos_data = []
+        for arquivo in arquivos:
             try:
-                projeto = db.query(Projeto).filter(Projeto.id == projeto_id).first()
-                if not projeto:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Projeto não encontrado'
-                    }), 404
-            finally:
-                db.close()
+                arquivo_dict = arquivo.to_dict()
+                arquivos_data.append(arquivo_dict)
+                print(f"✅ Processado: {arquivo.nome_original}")
+            except Exception as e:
+                print(f"⚠️  Erro ao converter arquivo {arquivo.id}: {e}")
+                continue
         
-        # Tentar S3 primeiro
-        if s3_manager.is_enabled():
-            s3_data = s3_manager.create_presigned_upload_url(
-                filename, content_type, projeto_id
-            )
-            
-            if s3_data:
-                return jsonify({
-                    'success': True,
-                    'method': 's3',
-                    'data': {
-                        'uploadUrl': s3_data['upload_url'],
-                        'fileUrl': s3_data['file_url'],
-                        'key': s3_data['key'],
-                        'contentType': s3_data['content_type']
-                    }
-                })
-        
-        # Fallback para upload local via API
         return jsonify({
             'success': True,
-            'method': 'local',
-            'data': {
-                'uploadUrl': '/api/arquivos/upload',
-                'message': 'Use upload tradicional'
-            }
+            'data': arquivos_data,
+            'total': len(arquivos_data),
+            'message': f'{len(arquivos_data)} arquivo(s) encontrado(s)',
+            'timestamp': datetime.now().isoformat()
         })
         
     except Exception as e:
+        print(f"❌ Erro ao listar arquivos: {e}")
+        import traceback
+        traceback.print_exc()
+        
         return jsonify({
             'success': False,
-            'error': f'Erro interno: {str(e)}'
+            'error': str(e),
+            'data': [],
+            'total': 0,
+            'timestamp': datetime.now().isoformat()
         }), 500
+    finally:
+        db.close()
 
 @arquivos_bp.route('/api/arquivos/upload', methods=['POST'])
 def upload_arquivo():
-    """
-    Upload tradicional (local) - mantém compatibilidade
-    """
+    """Upload de arquivo - VERSÃO COMPLETA"""
+    db = SessionLocal()
     try:
-        # Verificar se há arquivo
+        print("📤 Iniciando upload de arquivo...")
+        
+        # Verificar se há arquivo na requisição
         if 'file' not in request.files:
+            print("❌ Nenhum arquivo na requisição")
             return jsonify({
                 'success': False,
                 'error': 'Nenhum arquivo enviado'
             }), 400
         
         file = request.files['file']
+        
+        # Verificar se arquivo foi selecionado
         if file.filename == '':
+            print("❌ Arquivo sem nome")
             return jsonify({
                 'success': False,
                 'error': 'Nenhum arquivo selecionado'
             }), 400
         
-        # Dados do formulário
-        projeto_id = request.form.get('projeto_id', type=int)
-        descricao = request.form.get('descricao', '')
-        tipo_documento = request.form.get('tipo_documento', 'Geral')
+        print(f"📁 Arquivo recebido: {file.filename}")
         
-        # Verificar tamanho
-        file.seek(0, 2)  # Ir para o final
-        file_size = file.tell()
-        file.seek(0)  # Voltar ao início
-        
-        if file_size > MAX_FILE_SIZE:
+        # Verificar se arquivo é permitido
+        if not allowed_file(file.filename):
+            print(f"❌ Tipo não permitido: {file.filename}")
             return jsonify({
                 'success': False,
-                'error': f'Arquivo muito grande. Máximo: {MAX_FILE_SIZE // (1024*1024)}MB'
+                'error': f'Tipo de arquivo não permitido. Permitidos: {", ".join(ALLOWED_EXTENSIONS)}'
             }), 400
         
-        # Tentar S3 primeiro
-        cloud_data = None
-        if s3_manager.is_enabled():
-            file_data = file.read()
-            file.seek(0)  # Reset para uso local se necessário
-            
-            cloud_data = s3_manager.upload_file(file_data, file.filename, projeto_id)
+        # Dados adicionais do formulário
+        projeto_id = request.form.get('projeto_id', type=int)
+        tipo_documento = request.form.get('tipo_documento', get_file_type(file.filename))
+        descricao = request.form.get('descricao', '')
         
-        # Se S3 falhou, usar armazenamento local
-        local_data = None
-        if not cloud_data:
-            local_data = save_file_local(file, projeto_id)
-            if not local_data:
+        print(f"📋 Dados: projeto_id={projeto_id}, tipo={tipo_documento}")
+        
+        # Verificar se projeto existe (se informado)
+        if projeto_id:
+            projeto = db.query(Projeto).filter(Projeto.id == projeto_id).first()
+            if not projeto:
+                print(f"❌ Projeto {projeto_id} não encontrado")
                 return jsonify({
                     'success': False,
-                    'error': 'Falha ao salvar arquivo'
-                }), 500
+                    'error': 'Projeto não encontrado'
+                }), 404
+            print(f"✅ Projeto encontrado: {projeto.nome}")
         
-        # Salvar no banco de dados
-        db = next(get_db())
-        try:
-            novo_arquivo = Arquivo(
-                nome_original=file.filename,
-                nome_arquivo=cloud_data['key'] if cloud_data else local_data['nome_arquivo'],
-                caminho=cloud_data['key'] if cloud_data else local_data['caminho'],
-                tamanho=cloud_data['size'] if cloud_data else local_data['tamanho'],
-                tipo_mime=file.content_type or 'application/octet-stream',
-                tipo_documento=tipo_documento,
-                projeto_id=projeto_id if projeto_id else None,
-                descricao=descricao,
-                cloud_url=cloud_data['url'] if cloud_data else None,
-                cloud_id=cloud_data['key'] if cloud_data else None,
-                created_at=datetime.utcnow()
-            )
-            
-            db.add(novo_arquivo)
-            db.commit()
-            db.refresh(novo_arquivo)
-            
-            return jsonify({
-                'success': True,
-                'message': 'Arquivo enviado com sucesso',
-                'storage': 's3' if cloud_data else 'local',
-                'data': novo_arquivo.to_dict()
-            })
-            
-        except Exception as db_error:
-            db.rollback()
-            
-            # Limpar arquivo em caso de erro no banco
-            if cloud_data:
-                s3_manager.delete_file(cloud_data['key'])
-            elif local_data and os.path.exists(local_data['caminho']):
-                os.remove(local_data['caminho'])
-            
-            raise db_error
-        finally:
-            db.close()
-            
+        # Gerar nome único para o arquivo
+        filename = secure_filename(file.filename)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]  # Incluir milissegundos
+        nome_arquivo = f"{timestamp}_{filename}"
+        
+        # Caminho completo
+        file_path = os.path.join(UPLOAD_FOLDER, nome_arquivo)
+        
+        print(f"💾 Salvando em: {file_path}")
+        
+        # Salvar arquivo
+        file.save(file_path)
+        
+        # Obter informações do arquivo
+        file_size = os.path.getsize(file_path)
+        mime_type = mimetypes.guess_type(file_path)[0]
+        
+        print(f"📊 Tamanho: {file_size} bytes, MIME: {mime_type}")
+        
+        # Criar registro no banco
+        novo_arquivo = Arquivo(
+            nome_original=filename,
+            nome_arquivo=nome_arquivo,
+            caminho=file_path,
+            tamanho=file_size,
+            tipo_mime=mime_type,
+            tipo_documento=tipo_documento,
+            descricao=descricao,
+            projeto_id=projeto_id
+        )
+        
+        db.add(novo_arquivo)
+        db.commit()
+        db.refresh(novo_arquivo)
+        
+        print(f"✅ Arquivo salvo: {filename} -> {nome_arquivo} (ID: {novo_arquivo.id})")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Arquivo enviado com sucesso',
+            'data': novo_arquivo.to_dict(),
+            'timestamp': datetime.now().isoformat()
+        })
+        
     except Exception as e:
+        db.rollback()
+        print(f"❌ Erro no upload: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Limpar arquivo se foi salvo mas houve erro no banco
+        try:
+            if 'file_path' in locals() and os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"🗑️  Arquivo físico removido após erro: {file_path}")
+        except:
+            pass
+        
         return jsonify({
             'success': False,
-            'error': f'Erro interno: {str(e)}'
+            'error': f'Erro no upload: {str(e)}',
+            'timestamp': datetime.now().isoformat()
         }), 500
+    finally:
+        db.close()
 
-@arquivos_bp.route('/api/arquivos/confirm-s3', methods=['POST'])
-def confirm_s3_upload():
-    """
-    Confirmar upload S3 e salvar no banco
-    """
+@arquivos_bp.route('/api/arquivos/<int:arquivo_id>', methods=['GET'])
+def obter_arquivo(arquivo_id):
+    """Obter detalhes de um arquivo específico"""
+    db = SessionLocal()
     try:
-        data = request.get_json()
+        print(f"🔍 Buscando arquivo ID: {arquivo_id}")
         
-        required_fields = ['key', 'fileName', 'fileUrl']
-        if not data or not all(field in data for field in required_fields):
+        arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
+        
+        if not arquivo:
+            print(f"❌ Arquivo {arquivo_id} não encontrado")
             return jsonify({
                 'success': False,
-                'error': 'Dados incompletos'
-            }), 400
-        
-        key = data['key']
-        filename = data['fileName']
-        file_url = data['fileUrl']
-        projeto_id = data.get('projetoId')
-        descricao = data.get('descricao', '')
-        tipo_documento = data.get('tipoDocumento', 'Geral')
-        
-        # Verificar se arquivo existe no S3
-        if not s3_manager.file_exists(key):
-            return jsonify({
-                'success': False,
-                'error': 'Arquivo não encontrado no S3'
+                'error': 'Arquivo não encontrado'
             }), 404
         
-        # Salvar no banco
-        db = next(get_db())
-        try:
-            novo_arquivo = Arquivo(
-                nome_original=filename,
-                nome_arquivo=os.path.basename(key),
-                caminho=key,
-                tamanho=0,  # S3 não retorna tamanho facilmente
-                tipo_mime=data.get('contentType', 'application/octet-stream'),
-                tipo_documento=tipo_documento,
-                projeto_id=projeto_id if projeto_id else None,
-                descricao=descricao,
-                cloud_url=file_url,
-                cloud_id=key,
-                created_at=datetime.utcnow()
-            )
-            
-            db.add(novo_arquivo)
-            db.commit()
-            db.refresh(novo_arquivo)
-            
-            return jsonify({
-                'success': True,
-                'message': 'Arquivo confirmado com sucesso',
-                'data': novo_arquivo.to_dict()
-            })
-            
-        except Exception as db_error:
-            db.rollback()
-            raise db_error
-        finally:
-            db.close()
-            
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Erro interno: {str(e)}'
-        }), 500
-
-@arquivos_bp.route('/api/arquivos', methods=['GET'])
-def listar_arquivos():
-    """
-    Listar arquivos com filtros
-    """
-    try:
-        projeto_id = request.args.get('projeto_id', type=int)
-        tipo_documento = request.args.get('tipo_documento')
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
+        print(f"✅ Arquivo encontrado: {arquivo.nome_original}")
         
-        db = next(get_db())
-        try:
-            query = db.query(Arquivo)
-            
-            # Filtros
-            if projeto_id:
-                query = query.filter(Arquivo.projeto_id == projeto_id)
-            
-            if tipo_documento:
-                query = query.filter(Arquivo.tipo_documento == tipo_documento)
-            
-            # Paginação
-            total = query.count()
-            arquivos = query.order_by(Arquivo.created_at.desc()).offset(
-                (page - 1) * per_page
-            ).limit(per_page).all()
-            
-            return jsonify({
-                'success': True,
-                'data': [arquivo.to_dict() for arquivo in arquivos],
-                'pagination': {
-                    'page': page,
-                    'per_page': per_page,
-                    'total': total,
-                    'pages': (total + per_page - 1) // per_page
-                },
-                's3_enabled': s3_manager.is_enabled()
-            })
-            
-        finally:
-            db.close()
-            
+        return jsonify({
+            'success': True,
+            'data': arquivo.to_dict(),
+            'timestamp': datetime.now().isoformat()
+        })
+        
     except Exception as e:
+        print(f"❌ Erro ao obter arquivo: {e}")
         return jsonify({
             'success': False,
-            'error': f'Erro interno: {str(e)}'
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
         }), 500
-
-@arquivos_bp.route('/api/arquivos/<int:arquivo_id>', methods=['DELETE'])
-def deletar_arquivo(arquivo_id):
-    """
-    Deletar arquivo (S3 + local + banco)
-    """
-    try:
-        db = next(get_db())
-        try:
-            arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
-            
-            if not arquivo:
-                return jsonify({
-                    'success': False,
-                    'error': 'Arquivo não encontrado'
-                }), 404
-            
-            # Deletar do S3 se existir
-            if arquivo.cloud_id:
-                s3_manager.delete_file(arquivo.cloud_id)
-            
-            # Deletar arquivo local se existir
-            if arquivo.caminho and not arquivo.cloud_id:
-                local_path = arquivo.caminho
-                if os.path.exists(local_path):
-                    os.remove(local_path)
-            
-            # Deletar do banco
-            db.delete(arquivo)
-            db.commit()
-            
-            return jsonify({
-                'success': True,
-                'message': 'Arquivo deletado com sucesso'
-            })
-            
-        except Exception as db_error:
-            db.rollback()
-            raise db_error
-        finally:
-            db.close()
-            
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Erro interno: {str(e)}'
-        }), 500
+    finally:
+        db.close()
 
 @arquivos_bp.route('/api/arquivos/<int:arquivo_id>/download', methods=['GET'])
 def download_arquivo(arquivo_id):
-    """
-    Download de arquivo (S3 ou local)
-    """
+    """Download de arquivo"""
+    db = SessionLocal()
     try:
-        db = next(get_db())
-        try:
-            arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
-            
-            if not arquivo:
-                return jsonify({
-                    'success': False,
-                    'error': 'Arquivo não encontrado'
-                }), 404
-            
-            # Se é arquivo S3, gerar URL temporária
-            if arquivo.cloud_id:
-                download_url = s3_manager.get_download_url(arquivo.cloud_id)
-                if download_url:
-                    return jsonify({
-                        'success': True,
-                        'download_url': download_url,
-                        'filename': arquivo.nome_original
-                    })
-                else:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Arquivo não disponível no S3'
-                    }), 404
-            
-            # Arquivo local
-            elif arquivo.caminho and os.path.exists(arquivo.caminho):
-                return send_file(
-                    arquivo.caminho,
-                    as_attachment=True,
-                    download_name=arquivo.nome_original
-                )
-            
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': 'Arquivo não encontrado'
-                }), 404
-                
-        finally:
-            db.close()
-            
+        print(f"⬇️  Download do arquivo ID: {arquivo_id}")
+        
+        arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
+        
+        if not arquivo:
+            print(f"❌ Arquivo {arquivo_id} não encontrado no banco")
+            return jsonify({
+                'success': False,
+                'error': 'Arquivo não encontrado'
+            }), 404
+        
+        # Verificar se arquivo existe no sistema
+        if not os.path.exists(arquivo.caminho):
+            print(f"❌ Arquivo físico não encontrado: {arquivo.caminho}")
+            return jsonify({
+                'success': False,
+                'error': 'Arquivo físico não encontrado'
+            }), 404
+        
+        print(f"✅ Enviando arquivo: {arquivo.nome_original}")
+        
+        return send_file(
+            arquivo.caminho,
+            as_attachment=True,
+            download_name=arquivo.nome_original,
+            mimetype=arquivo.tipo_mime
+        )
+        
     except Exception as e:
+        print(f"❌ Erro no download: {e}")
         return jsonify({
             'success': False,
-            'error': f'Erro interno: {str(e)}'
+            'error': str(e)
         }), 500
+    finally:
+        db.close()
+
+@arquivos_bp.route('/api/arquivos/<int:arquivo_id>', methods=['DELETE'])
+def deletar_arquivo(arquivo_id):
+    """Deletar arquivo"""
+    db = SessionLocal()
+    try:
+        print(f"🗑️  Deletando arquivo ID: {arquivo_id}")
+        
+        arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
+        
+        if not arquivo:
+            print(f"❌ Arquivo {arquivo_id} não encontrado")
+            return jsonify({
+                'success': False,
+                'error': 'Arquivo não encontrado'
+            }), 404
+        
+        nome_original = arquivo.nome_original
+        caminho_arquivo = arquivo.caminho
+        
+        # Deletar arquivo físico
+        try:
+            if os.path.exists(caminho_arquivo):
+                os.remove(caminho_arquivo)
+                print(f"✅ Arquivo físico deletado: {caminho_arquivo}")
+            else:
+                print(f"⚠️  Arquivo físico já não existia: {caminho_arquivo}")
+        except Exception as e:
+            print(f"⚠️  Erro ao deletar arquivo físico: {e}")
+        
+        # Deletar registro do banco
+        db.delete(arquivo)
+        db.commit()
+        
+        print(f"✅ Registro deletado do banco: {nome_original}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Arquivo "{nome_original}" deletado com sucesso',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Erro ao deletar arquivo: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        db.close()
+
+@arquivos_bp.route('/api/arquivos/tipos', methods=['GET'])
+def listar_tipos_documento():
+    """Listar tipos de documento disponíveis"""
+    db = SessionLocal()
+    try:
+        print("📋 Listando tipos de documento...")
+        
+        # Tipos baseados nos arquivos existentes
+        tipos_existentes = db.query(Arquivo.tipo_documento).distinct().all()
+        tipos_existentes = [t[0] for t in tipos_existentes if t[0]]
+        
+        # Tipos padrão
+        tipos_padrao = [
+            'Contrato', 'Proposta', 'Orçamento', 'Projeto', 
+            'Documento', 'Planilha', 'Apresentação', 
+            'PDF', 'Imagem', 'Geral'
+        ]
+        
+        # Combinar e remover duplicatas
+        todos_tipos = list(set(tipos_padrao + tipos_existentes))
+        todos_tipos.sort()
+        
+        print(f"📝 {len(todos_tipos)} tipos disponíveis")
+        
+        return jsonify({
+            'success': True,
+            'data': todos_tipos,
+            'total': len(todos_tipos),
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Erro ao listar tipos: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        db.close()
 
 @arquivos_bp.route('/api/arquivos/stats', methods=['GET'])
 def estatisticas_arquivos():
-    """
-    Estatísticas de arquivos
-    """
+    """Estatísticas dos arquivos - VERSÃO CORRIGIDA"""
+    db = SessionLocal()
     try:
-        db = next(get_db())
-        try:
-            # Total de arquivos
-            total = db.query(Arquivo).count()
-            
-            # Por tipo
-            tipos = db.query(
-                Arquivo.tipo_documento, 
-                db.func.count(Arquivo.id)
-            ).group_by(Arquivo.tipo_documento).all()
-            
-            # Arquivos no S3 vs Local
-            s3_count = db.query(Arquivo).filter(Arquivo.cloud_id.isnot(None)).count()
-            local_count = total - s3_count
-            
-            return jsonify({
-                'success': True,
-                'data': {
-                    'total': total,
-                    'storage': {
-                        's3': s3_count,
-                        'local': local_count
-                    },
-                    'tipos': [{'tipo': tipo, 'count': count} for tipo, count in tipos],
-                    's3_enabled': s3_manager.is_enabled()
-                }
-            })
-            
-        finally:
-            db.close()
-            
+        print("📊 Calculando estatísticas de arquivos...")
+        
+        # Total de arquivos
+        total = db.query(Arquivo).count()
+        print(f"📁 Total de arquivos: {total}")
+        
+        # Por tipo - ✅ CORREÇÃO APLICADA
+        por_tipo = db.query(
+            Arquivo.tipo_documento,
+            func.count(Arquivo.id).label('quantidade')  # ✅ func importado corretamente
+        ).group_by(Arquivo.tipo_documento).all()
+        
+        # Tamanho total - ✅ CORREÇÃO APLICADA  
+        tamanho_total = db.query(func.sum(Arquivo.tamanho)).scalar() or 0  # ✅ func importado
+        
+        print(f"💾 Tamanho total: {tamanho_total} bytes")
+        print(f"📊 Tipos únicos: {len(por_tipo)}")
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_arquivos': total,
+                'tamanho_total_bytes': int(tamanho_total),
+                'tamanho_total_mb': round(tamanho_total / (1024 * 1024), 2),
+                'por_tipo': [
+                    {
+                        'tipo': item.tipo_documento or 'Sem tipo',
+                        'quantidade': item.quantidade
+                    }
+                    for item in por_tipo
+                ]
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Erro ao calcular estatísticas: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        db.close()
+
+# 🔧 Endpoint para limpar registros órfãos
+@arquivos_bp.route('/api/admin/arquivos/cleanup', methods=['POST'])
+def cleanup_arquivos():
+    """Limpar registros de arquivos órfãos (sem arquivo físico)"""
+    db = SessionLocal()
+    try:
+        print("🧹 Iniciando limpeza de registros órfãos...")
+        
+        arquivos = db.query(Arquivo).all()
+        removidos = 0
+        
+        print(f"🔍 Verificando {len(arquivos)} arquivo(s)...")
+        
+        for arquivo in arquivos:
+            if not os.path.exists(arquivo.caminho):
+                print(f"🗑️  Removendo registro órfão: {arquivo.nome_original} (ID: {arquivo.id})")
+                db.delete(arquivo)
+                removidos += 1
+            else:
+                print(f"✅ Arquivo OK: {arquivo.nome_original}")
+        
+        if removidos > 0:
+            db.commit()
+            print(f"✅ {removidos} registro(s) órfão(s) removido(s)")
+        else:
+            print("✅ Nenhum registro órfão encontrado")
+        
+        return jsonify({
+            'success': True,
+            'message': f'{removidos} registro(s) órfão(s) removido(s)',
+            'removidos': removidos,
+            'total_verificados': len(arquivos),
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Erro na limpeza: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        db.close()
+
+# 🔧 Endpoint de saúde para arquivos
+@arquivos_bp.route('/api/arquivos/health', methods=['GET'])
+def health_check_arquivos():
+    """Health check específico para o sistema de arquivos"""
+    db = SessionLocal()
+    try:
+        # Verificar conexão com banco
+        total_arquivos = db.query(Arquivo).count()
+        
+        # Verificar pasta de uploads
+        uploads_exists = os.path.exists(UPLOAD_FOLDER)
+        uploads_writable = os.access(UPLOAD_FOLDER, os.W_OK) if uploads_exists else False
+        
+        # Verificar arquivos órfãos
+        arquivos = db.query(Arquivo).all()
+        orfaos = sum(1 for arquivo in arquivos if not os.path.exists(arquivo.caminho))
+        
+        return jsonify({
+            'success': True,
+            'status': 'healthy',
+            'data': {
+                'total_arquivos': total_arquivos,
+                'pasta_uploads': {
+                    'existe': uploads_exists,
+                    'gravavel': uploads_writable,
+                    'caminho': UPLOAD_FOLDER
+                },
+                'registros_orfaos': orfaos,
+                'tipos_permitidos': list(ALLOWED_EXTENSIONS)
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
     except Exception as e:
         return jsonify({
             'success': False,
-            'error': f'Erro interno: {str(e)}'
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
         }), 500
+    finally:
+        db.close()

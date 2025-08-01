@@ -1,4 +1,4 @@
-// 📁 src/components/Dashboard/components/FilesSection.jsx - INTERFACE OTIMIZADA
+// FilesSection.jsx - VERSÃO COMPLETAMENTE CORRIGIDA
 import React, { useState, useCallback, useMemo } from 'react';
 import { 
   Upload, 
@@ -35,14 +35,15 @@ const FilesSection = ({
   onUpload, 
   onDelete, 
   onPreview, 
-  loading = false 
+  loading = false,
+  onRefresh
 }) => {
   // 🔧 ESTADOS DA INTERFACE
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadErrors, setUploadErrors] = useState([]);
-  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState([]);
   
   // 🎯 ESTADOS DE FILTROS E BUSCA
   const [searchTerm, setSearchTerm] = useState('');
@@ -74,113 +75,202 @@ const FilesSection = ({
   // 📝 VALIDAR ARQUIVO
   const validateFile = (file) => {
     const maxSize = 100 * 1024 * 1024; // 100MB
-    const allowedTypes = Object.keys(supportedTypes);
+    const allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'zip', 'rar'];
     
     if (file.size > maxSize) {
       return `Arquivo muito grande. Máximo: 100MB (atual: ${(file.size / 1024 / 1024).toFixed(1)}MB)`;
     }
     
-    if (!allowedTypes.includes(file.type)) {
-      return `Tipo de arquivo não suportado: ${file.type}`;
+    const extension = file.name.split('.').pop().toLowerCase();
+    if (!allowedExtensions.includes(extension)) {
+      return `Tipo de arquivo não suportado: .${extension}`;
     }
     
     return null;
   };
 
-  // 📤 PROCESSAR UPLOAD FUNCIONAL
+  // 🔧 TESTAR CONECTIVIDADE
+  const testConnection = useCallback(async () => {
+    try {
+      console.log('🔍 Testando conectividade...');
+      
+      const response = await fetch('/api/arquivos/health', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('📡 Resposta do servidor:', response.status);
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Teste bem-sucedido:', result);
+        
+        setUploadSuccess(prev => [...prev, '✅ Conexão com API funcionando!']);
+        
+        // Limpar após 3s
+        setTimeout(() => {
+          setUploadSuccess(prev => prev.filter(msg => !msg.includes('Conexão')));
+        }, 3000);
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.error('❌ Erro no teste:', error);
+      setUploadErrors(prev => [...prev, `❌ Erro na conexão: ${error.message}`]);
+    }
+  }, []);
+
+  // 📤 PROCESSAR UPLOAD - VERSÃO SUPER CORRIGIDA
   const processFiles = useCallback(async (fileList) => {
     const files = Array.from(fileList);
     const validFiles = [];
     const errors = [];
 
+    console.log(`📁 Processando ${files.length} arquivo(s)...`);
+
+    // Validar arquivos
     files.forEach(file => {
       const error = validateFile(file);
       if (error) {
         errors.push(`${file.name}: ${error}`);
       } else {
         validFiles.push(file);
+        console.log(`✅ Arquivo válido: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
       }
     });
 
     setUploadErrors(errors);
-    if (validFiles.length === 0) return;
+    if (validFiles.length === 0) {
+      console.log('❌ Nenhum arquivo válido para upload');
+      return;
+    }
 
     setUploading(true);
     setSelectedFiles(validFiles);
+    setUploadSuccess([]);
 
     try {
       for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
         
-        // Progresso realista
-        for (let progress = 0; progress <= 100; progress += 25) {
-          setUploadProgress(prev => ({
-            ...prev,
-            [file.name]: progress
-          }));
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
+        console.log(`📤 [${i + 1}/${validFiles.length}] Uploading: ${file.name}`);
+        
+        // Progresso inicial
+        setUploadProgress(prev => ({
+          ...prev,
+          [file.name]: 10
+        }));
 
-        // 🚀 UPLOAD REAL PARA O BACKEND
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('fileName', file.name);
-        formData.append('fileSize', file.size);
-        formData.append('fileType', file.type);
-        formData.append('projectId', selectedProject || '');
-        formData.append('description', `Arquivo ${file.name} enviado automaticamente`);
-
-        // Chamada para o backend
         try {
-          const response = await fetch('/api/files/upload', {
-            method: 'POST',
-            body: formData,
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-            }
+          // 🚀 FORMDATA CORRIGIDO
+          const formData = new FormData();
+          formData.append('file', file);
+          
+          // Campos opcionais
+          if (selectedProject) {
+            formData.append('projeto_id', selectedProject);
+          }
+          
+          formData.append('tipo_documento', supportedTypes[file.type]?.category || 'Geral');
+          formData.append('descricao', `Upload via interface - ${file.name}`);
+
+          console.log('📦 FormData preparado:', {
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type,
+            projeto_id: selectedProject
           });
 
-          if (!response.ok) {
-            throw new Error(`Erro HTTP: ${response.status}`);
+          // Progresso intermediário
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: 50
+          }));
+
+          // 🌐 CHAMADA AJAX SIMPLIFICADA
+          const response = await fetch('/api/arquivos/upload', {
+            method: 'POST',
+            body: formData,
+            // NÃO definir Content-Type - deixar o browser definir
+          });
+
+          console.log(`📡 Resposta HTTP: ${response.status} ${response.statusText}`);
+
+          // Verificar se a resposta é JSON
+          const contentType = response.headers.get('content-type');
+          console.log('📄 Content-Type:', contentType);
+
+          let result;
+          if (contentType && contentType.includes('application/json')) {
+            result = await response.json();
+          } else {
+            const text = await response.text();
+            console.error('❌ Resposta não é JSON:', text);
+            throw new Error(`Resposta inválida do servidor: ${text.substring(0, 100)}`);
           }
 
-          const result = await response.json();
-          
-          if (result.success) {
-            console.log('✅ Upload realizado com sucesso:', result);
+          console.log('📄 Resultado do upload:', result);
+
+          if (response.ok && result.success) {
+            // Progresso final
+            setUploadProgress(prev => ({
+              ...prev,
+              [file.name]: 100
+            }));
             
-            // Chamar callback do componente pai
-            if (onUpload) {
-              await onUpload(result.data);
-            }
+            console.log(`✅ Upload concluído: ${file.name}`);
+            setUploadSuccess(prev => [...prev, `✅ ${file.name} enviado com sucesso!`]);
+            
           } else {
-            throw new Error(result.error || 'Erro no upload');
+            throw new Error(result.error || `HTTP ${response.status}: ${response.statusText}`);
           }
+          
         } catch (uploadError) {
-          console.error('❌ Erro no upload:', uploadError);
+          console.error(`❌ Erro no upload de ${file.name}:`, uploadError);
           setUploadErrors(prev => [...prev, `${file.name}: ${uploadError.message}`]);
+          
+          // Zerar progresso em caso de erro
+          setUploadProgress(prev => ({
+            ...prev,
+            [file.name]: 0
+          }));
         }
       }
 
-      // Finalizar upload
+      // Aguardar um pouco para mostrar progresso completo
       setTimeout(() => {
+        console.log('🔄 Finalizando upload e atualizando lista...');
+        
+        // Chamar callback do componente pai para atualizar lista
+        if (onUpload) {
+          onUpload();
+        }
+        
+        // Atualizar via refresh se disponível
+        if (onRefresh) {
+          onRefresh();
+        }
+        
+        // Limpar estados
         setSelectedFiles([]);
         setUploadProgress({});
         setUploading(false);
-        setShowUploadModal(false);
         
-        // Recarregar a lista de arquivos
-        if (window.location) {
-          window.location.reload();
-        }
-      }, 1000);
+        // Limpar mensagens de sucesso após 5s
+        setTimeout(() => {
+          setUploadSuccess([]);
+        }, 5000);
+        
+      }, 1500);
 
     } catch (error) {
-      console.error('Erro geral no upload:', error);
+      console.error('❌ Erro geral no upload:', error);
       setUploadErrors(prev => [...prev, `Erro geral: ${error.message}`]);
       setUploading(false);
     }
-  }, [onUpload, selectedProject]);
+  }, [selectedProject, onUpload, onRefresh]);
 
   // 🎯 EVENTOS DE DRAG & DROP
   const handleDragOver = useCallback((e) => {
@@ -198,6 +288,7 @@ const FilesSection = ({
     e.stopPropagation();
     const files = e.dataTransfer.files;
     if (files.length > 0) {
+      console.log('🎯 Arquivos arrastados:', files.length);
       processFiles(files);
     }
   }, [processFiles]);
@@ -205,6 +296,7 @@ const FilesSection = ({
   const handleFileSelect = useCallback((e) => {
     const files = e.target.files;
     if (files.length > 0) {
+      console.log('📁 Arquivos selecionados:', files.length);
       processFiles(files);
     }
     e.target.value = ''; // Limpar input
@@ -212,11 +304,19 @@ const FilesSection = ({
 
   // 🔍 FILTROS E BUSCA
   const filteredAndSortedFiles = useMemo(() => {
+    if (!Array.isArray(files)) return [];
+    
     let filtered = files.filter(file => {
-      const matchesSearch = file.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          file.description?.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesProject = !selectedProject || file.projectId === selectedProject;
-      const matchesType = !selectedType || supportedTypes[file.type]?.category === selectedType;
+      const matchesSearch = (file.name || file.nome_original || '')
+        .toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (file.description || file.descricao || '')
+        .toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesProject = !selectedProject || 
+        String(file.projectId || file.projeto_id || '') === String(selectedProject);
+      
+      const fileCategory = supportedTypes[file.type || file.tipo_mime]?.category;
+      const matchesType = !selectedType || fileCategory === selectedType;
       
       return matchesSearch && matchesProject && matchesType;
     });
@@ -226,16 +326,16 @@ const FilesSection = ({
       
       switch (sortBy) {
         case 'name':
-          aValue = a.name || '';
-          bValue = b.name || '';
+          aValue = a.name || a.nome_original || '';
+          bValue = b.name || b.nome_original || '';
           break;
         case 'size':
-          aValue = a.size || 0;
-          bValue = b.size || 0;
+          aValue = a.size || a.tamanho || 0;
+          bValue = b.size || b.tamanho || 0;
           break;
         case 'type':
-          aValue = supportedTypes[a.type]?.name || '';
-          bValue = supportedTypes[b.type]?.name || '';
+          aValue = supportedTypes[a.type || a.tipo_mime]?.name || '';
+          bValue = supportedTypes[b.type || b.tipo_mime]?.name || '';
           break;
         case 'date':
         default:
@@ -254,11 +354,13 @@ const FilesSection = ({
 
   // 📊 ESTATÍSTICAS
   const stats = useMemo(() => {
-    const totalSize = files.reduce((sum, file) => sum + (file.size || 0), 0);
+    if (!Array.isArray(files)) return { totalFiles: 0, totalSize: 0, typeCount: {} };
+    
+    const totalSize = files.reduce((sum, file) => sum + (file.size || file.tamanho || 0), 0);
     const typeCount = {};
     
     files.forEach(file => {
-      const category = supportedTypes[file.type]?.category || 'Outros';
+      const category = supportedTypes[file.type || file.tipo_mime]?.category || 'Outros';
       typeCount[category] = (typeCount[category] || 0) + 1;
     });
 
@@ -279,6 +381,7 @@ const FilesSection = ({
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'Data não disponível';
     return new Date(dateString).toLocaleDateString('pt-BR', {
       day: '2-digit',
       month: '2-digit',
@@ -289,7 +392,7 @@ const FilesSection = ({
   };
 
   const getFileIcon = (fileType) => {
-    const fileInfo = supportedTypes[fileType] || { icon: File, color: 'text-gray-600' };
+    const fileInfo = supportedTypes[fileType] || { icon: File, color: 'text-gray-600', name: '?' };
     return fileInfo;
   };
 
@@ -313,22 +416,48 @@ const FilesSection = ({
     }
   };
 
+  // 🔧 LIMPAR MENSAGENS
+  const clearErrors = () => setUploadErrors([]);
+  const clearSuccess = () => setUploadSuccess([]);
+
   return (
     <div className="space-y-4">
-      {/* 📊 HEADER COMPACTO COM BOTÃO DE UPLOAD */}
+      {/* 📊 HEADER COM ESTATÍSTICAS */}
       <div className="bg-white rounded-lg shadow-sm border p-4">
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
               <FileText className="w-6 h-6 text-blue-600" />
-              Arquivos ({files.length})
+              Arquivos ({stats.totalFiles})
             </h1>
             <p className="text-sm text-gray-600">
-              {formatFileSize(stats.totalSize)} • {Object.keys(stats.typeCount).length} tipos
+              {formatFileSize(stats.totalSize)} • {Object.keys(stats.typeCount).length} categorias
             </p>
           </div>
           
           <div className="flex items-center gap-3">
+            {/* Botão de teste de conectividade */}
+            <button
+              onClick={testConnection}
+              className="p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+              title="Testar conexão com API"
+            >
+              <Zap className="w-5 h-5" />
+            </button>
+            
+            {/* Botão de refresh */}
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title="Atualizar lista"
+                disabled={loading}
+              >
+                <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+            
+            {/* Toggle de visualização */}
             <button
               onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
               className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -337,27 +466,111 @@ const FilesSection = ({
               {viewMode === 'grid' ? <List className="w-5 h-5" /> : <Grid className="w-5 h-5" />}
             </button>
             
+            {/* Input de upload (hidden) */}
             <input
               type="file"
               multiple
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt,.zip,.dwg,.dxf"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.txt,.zip,.rar"
               onChange={handleFileSelect}
               className="hidden"
               id="file-upload-input"
             />
             
+            {/* Botão de upload */}
             <label
               htmlFor="file-upload-input"
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer inline-flex items-center gap-2 font-medium"
+              className={`px-4 py-2 rounded-lg font-medium cursor-pointer inline-flex items-center gap-2 transition-colors ${
+                uploading 
+                  ? 'bg-gray-400 text-white cursor-not-allowed' 
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
             >
               <Upload className="w-4 h-4" />
-              Upload Arquivos
+              {uploading ? 'Enviando...' : 'Upload Arquivos'}
             </label>
           </div>
         </div>
       </div>
 
-      {/* 🔍 BARRA DE BUSCA E FILTROS COMPACTA */}
+      {/* ✅ MENSAGENS DE SUCESSO */}
+      {uploadSuccess.length > 0 && (
+        <div className="space-y-2">
+          {uploadSuccess.map((message, index) => (
+            <div key={index} className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-3">
+              <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-green-800">{message}</p>
+              </div>
+              <button
+                onClick={clearSuccess}
+                className="text-green-600 hover:text-green-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ⚠️ MENSAGENS DE ERRO */}
+      {uploadErrors.length > 0 && (
+        <div className="space-y-2">
+          {uploadErrors.map((error, index) => (
+            <div key={index} className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-red-800">{error}</p>
+              </div>
+              <button
+                onClick={() => setUploadErrors(prev => prev.filter((_, i) => i !== index))}
+                className="text-red-600 hover:text-red-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={clearErrors}
+            className="text-sm text-red-600 hover:text-red-800 underline"
+          >
+            Limpar todos os erros
+          </button>
+        </div>
+      )}
+
+      {/* 📤 PROGRESSO DE UPLOAD */}
+      {uploading && selectedFiles.length > 0 && (
+        <div className="bg-white rounded-lg shadow-sm border p-4">
+          <div className="flex items-center gap-3 mb-4">
+            <RefreshCw className="w-5 h-5 text-blue-600 animate-spin" />
+            <h3 className="font-medium text-gray-900">
+              Enviando {selectedFiles.length} arquivo(s)...
+            </h3>
+          </div>
+          <div className="space-y-3">
+            {selectedFiles.map(file => (
+              <div key={file.name} className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-900 truncate flex-1">
+                    {file.name}
+                  </span>
+                  <span className="text-sm text-gray-500 ml-2">
+                    {uploadProgress[file.name] || 0}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${uploadProgress[file.name] || 0}%` }}
+                  ></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 🔍 FILTROS */}
       <div className="bg-white rounded-lg shadow-sm border p-4">
         <div className="flex flex-col lg:flex-row gap-3">
           <div className="flex-1 relative">
@@ -379,7 +592,9 @@ const FilesSection = ({
             >
               <option value="">Todos os projetos</option>
               {projects.map(project => (
-                <option key={project.id} value={project.id}>{project.nome}</option>
+                <option key={project.id} value={project.id}>
+                  {project.nome || project.name}
+                </option>
               ))}
             </select>
             
@@ -407,8 +622,8 @@ const FilesSection = ({
               <option value="date-asc">Mais antigos</option>
               <option value="name-asc">Nome A-Z</option>
               <option value="name-desc">Nome Z-A</option>
-              <option value="size-desc">Maior</option>
-              <option value="size-asc">Menor</option>
+              <option value="size-desc">Maior tamanho</option>
+              <option value="size-asc">Menor tamanho</option>
             </select>
           </div>
         </div>
@@ -422,13 +637,13 @@ const FilesSection = ({
             <div className="flex gap-2">
               <button
                 onClick={handleBulkDelete}
-                className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+                className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 transition-colors"
               >
                 Excluir
               </button>
               <button
                 onClick={() => setSelectedFileIds(new Set())}
-                className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700"
+                className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700 transition-colors"
               >
                 Cancelar
               </button>
@@ -437,62 +652,13 @@ const FilesSection = ({
         )}
       </div>
 
-      {/* ⚠️ ERROS DE UPLOAD */}
-      {uploadErrors.length > 0 && (
-        <div className="space-y-2">
-          {uploadErrors.map((error, index) => (
-            <div key={index} className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-3">
-              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm text-red-800">{error}</p>
-              </div>
-              <button
-                onClick={() => setUploadErrors(prev => prev.filter((_, i) => i !== index))}
-                className="text-red-600 hover:text-red-800"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 📤 MODAL DE UPLOAD ATIVO */}
-      {uploading && (
-        <div className="bg-white rounded-lg shadow-sm border p-4">
-          <div className="flex items-center gap-3 mb-4">
-            <Zap className="w-5 h-5 text-blue-600 animate-pulse" />
-            <h3 className="font-medium text-gray-900">Enviando arquivos...</h3>
-          </div>
-          <div className="space-y-3">
-            {selectedFiles.map(file => (
-              <div key={file.name} className="bg-gray-50 rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-gray-900 truncate flex-1">
-                    {file.name}
-                  </span>
-                  <span className="text-sm text-gray-500 ml-2">
-                    {uploadProgress[file.name] || 0}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${uploadProgress[file.name] || 0}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 📋 LISTA DE ARQUIVOS EXPANDIDA */}
+      {/* 📋 LISTA DE ARQUIVOS */}
       <div className="bg-white rounded-lg shadow-sm border">
         <div className="p-4">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
+              <span className="ml-3 text-gray-600">Carregando arquivos...</span>
             </div>
           ) : filteredAndSortedFiles.length > 0 ? (
             <div 
@@ -502,9 +668,13 @@ const FilesSection = ({
               onDrop={handleDrop}
             >
               {filteredAndSortedFiles.map(file => {
-                const fileInfo = getFileIcon(file.type || file.mimeType);
+                const fileInfo = getFileIcon(file.type || file.tipo_mime);
                 const IconComponent = fileInfo.icon;
                 const isSelected = selectedFileIds.has(file.id);
+                
+                const fileName = file.name || file.nome_original || 'Arquivo sem nome';
+                const fileSize = file.size || file.tamanho || 0;
+                const fileDate = file.uploadDate || file.created_at;
                 
                 if (viewMode === 'grid') {
                   return (
@@ -529,13 +699,13 @@ const FilesSection = ({
                       </div>
                       
                       <div className="space-y-2">
-                        <h3 className="font-medium text-gray-900 text-sm truncate" title={file.name}>
-                          {file.name || file.fileName}
+                        <h3 className="font-medium text-gray-900 text-sm truncate" title={fileName}>
+                          {fileName}
                         </h3>
                         
                         <div className="text-xs text-gray-500 space-y-1">
                           <div className="flex items-center justify-between">
-                            <span>{formatFileSize(file.size || file.fileSize || 0)}</span>
+                            <span>{formatFileSize(fileSize)}</span>
                             <span className={`px-2 py-1 rounded-full ${fileInfo.color} bg-opacity-10 font-medium`}>
                               {fileInfo.name}
                             </span>
@@ -543,7 +713,7 @@ const FilesSection = ({
                           
                           <div className="flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            <span>{formatDate(file.uploadDate || file.created_at || new Date())}</span>
+                            <span>{formatDate(fileDate)}</span>
                           </div>
                         </div>
                       </div>
@@ -564,10 +734,8 @@ const FilesSection = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              const link = document.createElement('a');
-                              link.href = file.url || '#';
-                              link.download = file.name || 'arquivo';
-                              link.click();
+                              const downloadUrl = file.url || `/api/arquivos/${file.id}/download`;
+                              window.open(downloadUrl, '_blank');
                             }}
                             className="p-1 text-green-600 hover:bg-green-100 rounded"
                             title="Baixar"
@@ -617,7 +785,7 @@ const FilesSection = ({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="font-medium text-gray-900 truncate text-sm">
-                            {file.name || file.fileName}
+                            {fileName}
                           </h3>
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${fileInfo.color} bg-opacity-10`}>
                             {fileInfo.name}
@@ -625,10 +793,10 @@ const FilesSection = ({
                         </div>
                         
                         <div className="flex items-center gap-3 text-xs text-gray-500">
-                          <span>{formatFileSize(file.size || file.fileSize || 0)}</span>
+                          <span>{formatFileSize(fileSize)}</span>
                           <span className="flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            {formatDate(file.uploadDate || file.created_at || new Date())}
+                            {formatDate(fileDate)}
                           </span>
                         </div>
                       </div>
@@ -647,10 +815,8 @@ const FilesSection = ({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            const link = document.createElement('a');
-                            link.href = file.url || '#';
-                            link.download = file.name || 'arquivo';
-                            link.click();
+                            const downloadUrl = file.url || `/api/arquivos/${file.id}/download`;
+                            window.open(downloadUrl, '_blank');
                           }}
                           className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
                           title="Baixar"
@@ -677,7 +843,7 @@ const FilesSection = ({
             </div>
           ) : (
             <div 
-              className="text-center py-16 border-2 border-dashed border-gray-300 rounded-lg"
+              className="text-center py-16 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-400 transition-colors"
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
@@ -713,12 +879,29 @@ const FilesSection = ({
         <div className="bg-gray-50 rounded-lg p-3">
           <div className="flex justify-between items-center text-sm text-gray-600">
             <span>
-              {filteredAndSortedFiles.length} de {files.length} arquivo(s)
+              {filteredAndSortedFiles.length} de {stats.totalFiles} arquivo(s)
             </span>
             <span>
               {formatFileSize(stats.totalSize)}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* 🔧 DEBUG INFO (apenas em desenvolvimento) */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="bg-gray-100 rounded-lg p-3 text-xs text-gray-600">
+          <details>
+            <summary className="cursor-pointer font-medium">Debug Info</summary>
+            <div className="mt-2 space-y-1">
+              <div>Total de arquivos: {files.length}</div>
+              <div>Arquivos filtrados: {filteredAndSortedFiles.length}</div>
+              <div>Upload ativo: {uploading ? 'Sim' : 'Não'}</div>
+              <div>Erros: {uploadErrors.length}</div>
+              <div>Sucessos: {uploadSuccess.length}</div>
+              <div>API Base: /api/arquivos</div>
+            </div>
+          </details>
         </div>
       )}
     </div>

@@ -673,14 +673,12 @@ const useAuthLogic = () => {
     config: AUTH_CONFIG
   };
 };
-
-// Provider de autenticação - MANTIDO
 export const AuthProvider = ({ children }) => {
   const auth = useAuthLogic();
   return React.createElement(AuthContext.Provider, { value: auth }, children);
 };
 
-// Hook para usar autenticação - MANTIDO
+// Hook para usar autenticação
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {

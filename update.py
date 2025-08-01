@@ -1,440 +1,169 @@
-#!/usr/bin/env python3
-"""
-Script para corrigir o erro de sintaxe do SQLAlchemy no database.py
-"""
-
+# debug_aws.py - TESTAR CONEXÃO AWS
 import os
-from pathlib import Path
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 
-def fix_database_file():
-    """Corrigir a sintaxe do SQLAlchemy no database.py"""
-    print("🔧 CORRIGINDO SINTAXE DO SQLALCHEMY")
-    print("=" * 40)
+def test_aws_connection():
+    """Testar conexão com AWS S3"""
     
-    database_file = Path("app/database.py")
+    print("🔍 TESTANDO CONEXÃO AWS S3...")
+    print("=" * 50)
     
-    if not database_file.exists():
-        database_file = Path("database.py")
+    # 1. Verificar variáveis de ambiente
+    aws_vars = {
+        'AWS_ACCESS_KEY_ID': os.getenv('AWS_ACCESS_KEY_ID'),
+        'AWS_SECRET_ACCESS_KEY': os.getenv('AWS_SECRET_ACCESS_KEY'),
+        'AWS_BUCKET_NAME': os.getenv('AWS_BUCKET_NAME'),
+        'AWS_REGION': os.getenv('AWS_REGION', 'us-east-1')
+    }
     
-    if not database_file.exists():
-        print("❌ Arquivo database.py não encontrado!")
+    print("📋 VARIÁVEIS DE AMBIENTE:")
+    for key, value in aws_vars.items():
+        if 'SECRET' in key:
+            print(f"   {key}: {'*' * len(value) if value else 'NÃO DEFINIDA'}")
+        else:
+            print(f"   {key}: {value or 'NÃO DEFINIDA'}")
+    
+    # Verificar se todas estão definidas
+    missing_vars = [k for k, v in aws_vars.items() if not v]
+    if missing_vars:
+        print(f"\n❌ VARIÁVEIS FALTANDO: {', '.join(missing_vars)}")
+        print("\n🔧 SOLUÇÃO:")
+        print("   1. Configure no arquivo .env:")
+        print("      AWS_ACCESS_KEY_ID=sua_access_key")
+        print("      AWS_SECRET_ACCESS_KEY=sua_secret_key")
+        print("      AWS_BUCKET_NAME=seu_bucket")
+        print("      AWS_REGION=us-east-1")
         return False
     
-    print(f"📝 Corrigindo arquivo: {database_file}")
+    print("\n✅ Todas as variáveis definidas!")
     
-    # Ler o arquivo atual
-    with open(database_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # Fazer backup
-    backup_file = database_file.parent / f"{database_file.stem}_backup.py"
-    with open(backup_file, 'w', encoding='utf-8') as f:
-        f.write(content)
-    print(f"📁 Backup criado: {backup_file}")
-    
-    # Correções necessárias
-    fixes = [
-        # Corrigir a sintaxe do execute
-        ('conn.execute("SELECT 1")', 'conn.execute(text("SELECT 1"))'),
+    # 2. Testar autenticação
+    try:
+        print("\n🔐 TESTANDO AUTENTICAÇÃO...")
         
-        # Adicionar import do text se não existir
-        ('from sqlalchemy import create_engine,', 'from sqlalchemy import create_engine, text,'),
+        session = boto3.Session(
+            aws_access_key_id=aws_vars['AWS_ACCESS_KEY_ID'],
+            aws_secret_access_key=aws_vars['AWS_SECRET_ACCESS_KEY'],
+            region_name=aws_vars['AWS_REGION']
+        )
         
-        # Se já tem text, não duplicar
-        ('from sqlalchemy import create_engine, text, Column,', 'from sqlalchemy import create_engine, text, Column,'),
-    ]
-    
-    # Aplicar correções
-    for old, new in fixes:
-        if old in content:
-            content = content.replace(old, new)
-            print(f"✅ Corrigido: {old[:30]}... -> {new[:30]}...")
-    
-    # Verificar se já tem import do text
-    if 'from sqlalchemy import' in content and 'text' not in content:
-        # Adicionar text ao import existente
-        import_line = None
-        for line in content.split('\n'):
-            if line.startswith('from sqlalchemy import') and 'create_engine' in line:
-                import_line = line
-                break
+        sts = session.client('sts')
+        identity = sts.get_caller_identity()
         
-        if import_line and 'text' not in import_line:
-            new_import = import_line.replace('create_engine,', 'create_engine, text,')
-            content = content.replace(import_line, new_import)
-            print("✅ Adicionado import do 'text'")
+        print(f"✅ Autenticado como: {identity.get('Arn', 'N/A')}")
+        print(f"✅ Account ID: {identity.get('Account', 'N/A')}")
+        
+    except NoCredentialsError:
+        print("❌ CREDENCIAIS INVÁLIDAS")
+        print("🔧 Verifique se AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY estão corretos")
+        return False
+    except ClientError as e:
+        print(f"❌ ERRO DE AUTENTICAÇÃO: {e}")
+        return False
     
-    # Escrever arquivo corrigido
-    with open(database_file, 'w', encoding='utf-8') as f:
-        f.write(content)
+    # 3. Testar acesso ao bucket
+    try:
+        print(f"\n🪣 TESTANDO BUCKET: {aws_vars['AWS_BUCKET_NAME']}")
+        
+        s3 = session.client('s3')
+        
+        # Verificar se bucket existe
+        s3.head_bucket(Bucket=aws_vars['AWS_BUCKET_NAME'])
+        print("✅ Bucket existe e é acessível!")
+        
+        # Testar permissões de escrita
+        test_key = 'hvac-test-file.txt'
+        test_content = b'Teste de upload HVAC'
+        
+        s3.put_object(
+            Bucket=aws_vars['AWS_BUCKET_NAME'],
+            Key=test_key,
+            Body=test_content,
+            ContentType='text/plain'
+        )
+        print("✅ Permissão de escrita OK!")
+        
+        # Limpar arquivo de teste
+        s3.delete_object(Bucket=aws_vars['AWS_BUCKET_NAME'], Key=test_key)
+        print("✅ Permissão de exclusão OK!")
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            print(f"❌ BUCKET '{aws_vars['AWS_BUCKET_NAME']}' NÃO EXISTE")
+            print("🔧 Crie o bucket no AWS Console ou verifique o nome")
+        elif error_code == 'AccessDenied':
+            print("❌ SEM PERMISSÃO NO BUCKET")
+            print("🔧 Verifique as políticas IAM do usuário")
+        else:
+            print(f"❌ ERRO NO BUCKET: {e}")
+        return False
     
-    print("✅ Arquivo database.py corrigido!")
+    # 4. Teste completo
+    print("\n🎉 CONEXÃO AWS FUNCIONANDO PERFEITAMENTE!")
+    print("✅ Autenticação: OK")
+    print("✅ Bucket: OK") 
+    print("✅ Permissões: OK")
+    
     return True
 
-def create_fixed_database_content():
-    """Criar conteúdo completo e corrigido do database.py"""
-    return '''# database.py - VERSÃO CORRIGIDA PARA PRODUÇÃO
-from sqlalchemy import create_engine, text, Column, Integer, String, Text, Date, DateTime, Numeric, Boolean, ForeignKey
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship
-from datetime import datetime
-import json
-import os
-from dotenv import load_dotenv
-
-# Carregar variáveis de ambiente
-load_dotenv()
-
-# ===== CONFIGURAÇÃO PRODUÇÃO - APENAS AWS RDS =====
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    raise Exception("❌ DATABASE_URL não configurada! Configure no .env")
-
-if "localhost" in DATABASE_URL or "sqlite" in DATABASE_URL:
-    print("⚠️  AVISO: Configuração de desenvolvimento detectada!")
-
-print(f"🔗 Conectando ao AWS RDS: {DATABASE_URL.split('@')[1].split('/')[0] if '@' in DATABASE_URL else 'RDS'}")
-
-# ===== ENGINE OTIMIZADO PARA PRODUÇÃO =====
-engine = create_engine(
-    DATABASE_URL,
-    echo=False,  # NUNCA True em produção
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=3600,
-    pool_pre_ping=True,
-    connect_args={
-        "connect_timeout": 30,
-        "sslmode": "require"
-    } if "postgresql" in DATABASE_URL else {}
-)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-def get_db():
-    """Dependency para obter sessão do banco"""
-    db = SessionLocal()
+def test_local_fallback():
+    """Testar sistema local como fallback"""
+    print("\n🏠 TESTANDO SISTEMA LOCAL...")
+    
+    upload_folder = 'uploads'
+    
+    # Criar pasta se não existir
+    if not os.path.exists(upload_folder):
+        os.makedirs(upload_folder)
+        print(f"✅ Pasta '{upload_folder}' criada")
+    
+    # Testar escrita
     try:
-        yield db
-    finally:
-        db.close()
-
-# ===== MODELOS DO BANCO DE DADOS =====
-
-class Cliente(Base):
-    __tablename__ = 'clientes'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String(200), nullable=False)
-    email = Column(String(120), unique=True, nullable=False, index=True)
-    telefone = Column(String(20))
-    cpf_cnpj = Column(String(20), unique=True, index=True)
-    endereco = Column(Text)
-    cidade = Column(String(100))
-    estado = Column(String(2))
-    cep = Column(String(10))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relacionamentos
-    projetos = relationship("Projeto", back_populates="cliente")
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'nome': self.nome,
-            'email': self.email,
-            'telefone': self.telefone,
-            'cpf_cnpj': self.cpf_cnpj,
-            'endereco': self.endereco,
-            'cidade': self.cidade,
-            'estado': self.estado,
-            'cep': self.cep,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'total_projetos': len(self.projetos) if self.projetos else 0
-        }
-
-class Projeto(Base):
-    __tablename__ = 'projetos'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String(200), nullable=False)
-    descricao = Column(Text)
-    cliente_id = Column(Integer, ForeignKey('clientes.id'), nullable=False)
-    valor_total = Column(Numeric(10, 2))
-    valor_pago = Column(Numeric(10, 2), default=0)
-    progresso = Column(Integer, default=0)
-    status = Column(String(50), default='Orçamento', index=True)
-    data_inicio = Column(Date)
-    data_prazo = Column(Date)
-    data_conclusao = Column(Date)
-    endereco_obra = Column(Text)
-    tipo_servico = Column(String(100))
-    equipamentos = Column(Text)
-    observacoes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relacionamentos
-    cliente = relationship("Cliente", back_populates="projetos")
-    arquivos = relationship("Arquivo", back_populates="projeto", cascade="all, delete-orphan")
-    contas = relationship("Conta", back_populates="projeto")
-    equipe_projeto = relationship("EquipeProjeto", back_populates="projeto", cascade="all, delete-orphan")
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'nome': self.nome,
-            'descricao': self.descricao,
-            'cliente_id': self.cliente_id,
-            'cliente_nome': self.cliente.nome if self.cliente else None,
-            'valor_total': float(self.valor_total) if self.valor_total else 0,
-            'valor_pago': float(self.valor_pago) if self.valor_pago else 0,
-            'progresso': self.progresso,
-            'status': self.status,
-            'data_inicio': self.data_inicio.isoformat() if self.data_inicio else None,
-            'data_prazo': self.data_prazo.isoformat() if self.data_prazo else None,
-            'data_conclusao': self.data_conclusao.isoformat() if self.data_conclusao else None,
-            'endereco_obra': self.endereco_obra,
-            'tipo_servico': self.tipo_servico,
-            'equipamentos': json.loads(self.equipamentos) if self.equipamentos else [],
-            'observacoes': self.observacoes,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'total_arquivos': len(self.arquivos) if self.arquivos else 0,
-            'equipe': [ep.funcionario.nome for ep in self.equipe_projeto if ep.ativo] if self.equipe_projeto else []
-        }
-
-class Funcionario(Base):
-    __tablename__ = 'funcionarios'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String(200), nullable=False)
-    cpf = Column(String(14), unique=True, nullable=False, index=True)
-    telefone = Column(String(20))
-    email = Column(String(120), index=True)
-    cargo = Column(String(100))
-    salario = Column(Numeric(10, 2))
-    data_admissao = Column(Date)
-    status = Column(String(20), default='Ativo', index=True)
-    especialidades = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relacionamentos
-    equipe_projeto = relationship("EquipeProjeto", back_populates="funcionario")
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'nome': self.nome,
-            'cpf': self.cpf,
-            'telefone': self.telefone,
-            'email': self.email,
-            'cargo': self.cargo,
-            'salario': float(self.salario) if self.salario else 0,
-            'data_admissao': self.data_admissao.isoformat() if self.data_admissao else None,
-            'status': self.status,
-            'especialidades': json.loads(self.especialidades) if self.especialidades else [],
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'projetos_ativos': len([ep for ep in self.equipe_projeto if ep.projeto.status == 'Em Andamento' and ep.ativo]) if self.equipe_projeto else 0
-        }
-
-class EquipeProjeto(Base):
-    __tablename__ = 'equipe_projeto'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    projeto_id = Column(Integer, ForeignKey('projetos.id'), nullable=False)
-    funcionario_id = Column(Integer, ForeignKey('funcionarios.id'), nullable=False)
-    funcao = Column(String(100))
-    data_entrada = Column(Date, default=datetime.now().date())
-    data_saida = Column(Date)
-    ativo = Column(Boolean, default=True)
-    
-    # Relacionamentos
-    projeto = relationship("Projeto", back_populates="equipe_projeto")
-    funcionario = relationship("Funcionario", back_populates="equipe_projeto")
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'projeto_id': self.projeto_id,
-            'funcionario_id': self.funcionario_id,
-            'funcionario_nome': self.funcionario.nome if self.funcionario else None,
-            'funcao': self.funcao,
-            'data_entrada': self.data_entrada.isoformat() if self.data_entrada else None,
-            'data_saida': self.data_saida.isoformat() if self.data_saida else None,
-            'ativo': self.ativo
-        }
-
-class Conta(Base):
-    __tablename__ = 'contas'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    descricao = Column(String(200), nullable=False)
-    valor = Column(Numeric(10, 2), nullable=False)
-    tipo = Column(String(50), nullable=False, index=True)
-    categoria = Column(String(100), index=True)
-    data_vencimento = Column(Date, nullable=False, index=True)
-    data_pagamento = Column(Date)
-    status = Column(String(20), default='Pendente', index=True)
-    prioridade = Column(String(20), default='Média', index=True)
-    projeto_id = Column(Integer, ForeignKey('projetos.id'))
-    fornecedor = Column(String(200))
-    numero_documento = Column(String(50))
-    observacoes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relacionamentos
-    projeto = relationship("Projeto", back_populates="contas")
-    
-    def to_dict(self):
-        dias_vencimento = None
-        if self.data_vencimento:
-            dias_vencimento = (self.data_vencimento - datetime.now().date()).days
-        
-        return {
-            'id': self.id,
-            'descricao': self.descricao,
-            'valor': float(self.valor),
-            'tipo': self.tipo,
-            'categoria': self.categoria,
-            'data_vencimento': self.data_vencimento.isoformat() if self.data_vencimento else None,
-            'data_pagamento': self.data_pagamento.isoformat() if self.data_pagamento else None,
-            'status': self.status,
-            'prioridade': self.prioridade,
-            'projeto_id': self.projeto_id,
-            'projeto_nome': self.projeto.nome if self.projeto else None,
-            'fornecedor': self.fornecedor,
-            'numero_documento': self.numero_documento,
-            'observacoes': self.observacoes,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'dias_vencimento': dias_vencimento
-        }
-
-class Arquivo(Base):
-    __tablename__ = 'arquivos'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    nome_original = Column(String(200), nullable=False)
-    nome_arquivo = Column(String(200), nullable=False)
-    caminho = Column(String(500), nullable=False)
-    tamanho = Column(Integer)
-    tipo_mime = Column(String(100))
-    tipo_documento = Column(String(50), index=True)
-    projeto_id = Column(Integer, ForeignKey('projetos.id'))
-    descricao = Column(Text)
-    tags = Column(Text)
-    cloud_url = Column(String(500))
-    cloud_id = Column(String(200))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relacionamentos
-    projeto = relationship("Projeto", back_populates="arquivos")
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'nome_original': self.nome_original,
-            'nome_arquivo': self.nome_arquivo,
-            'tamanho': self.tamanho,
-            'tipo_mime': self.tipo_mime,
-            'tipo_documento': self.tipo_documento,
-            'projeto_id': self.projeto_id,
-            'projeto_nome': self.projeto.nome if self.projeto else None,
-            'descricao': self.descricao,
-            'tags': json.loads(self.tags) if self.tags else [],
-            'cloud_url': self.cloud_url,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
-
-class Notificacao(Base):
-    __tablename__ = 'notificacoes'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    titulo = Column(String(200), nullable=False)
-    mensagem = Column(Text, nullable=False)
-    tipo = Column(String(50), default='info', index=True)
-    lida = Column(Boolean, default=False, index=True)
-    projeto_id = Column(Integer, ForeignKey('projetos.id'))
-    conta_id = Column(Integer, ForeignKey('contas.id'))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'titulo': self.titulo,
-            'mensagem': self.mensagem,
-            'tipo': self.tipo,
-            'lida': self.lida,
-            'projeto_id': self.projeto_id,
-            'conta_id': self.conta_id,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
-
-# ===== FUNÇÃO PARA CRIAR TABELAS =====
-def create_tables():
-    """Criar todas as tabelas no banco de dados"""
-    Base.metadata.create_all(bind=engine)
-    print("✅ Tabelas criadas com sucesso!")
-
-# ===== VERIFICAÇÃO DE PRODUÇÃO (CORRIGIDA) =====
-def verify_production_config():
-    """Verificar se a configuração está correta para produção"""
-    print("🔍 Verificando configuração de produção...")
-    
-    # Verificar DATABASE_URL
-    if not DATABASE_URL:
-        raise Exception("❌ DATABASE_URL não configurada!")
-    
-    # Verificar conexão (SINTAXE CORRIGIDA)
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1"))
-            result.fetchone()
-        print("✅ Conexão com AWS RDS verificada!")
+        test_file = os.path.join(upload_folder, 'test.txt')
+        with open(test_file, 'w') as f:
+            f.write('teste')
+        os.remove(test_file)
+        print("✅ Sistema local funcionando!")
+        return True
     except Exception as e:
-        print(f"⚠️  Aviso na conexão com AWS RDS: {e}")
-        print("💡 A aplicação pode ainda funcionar - continuando...")
-    
-    print("✅ Configuração de produção verificada!")
-
-# Executar verificação na importação (mas não falhar se der erro)
-try:
-    verify_production_config()
-except Exception as e:
-    print(f"⚠️  Aviso na verificação: {e}")
-    print("💡 Continuando inicialização...")
-'''
-
-def main():
-    """Função principal"""
-    print("🚀 CORRIGINDO ERRO DO SQLALCHEMY")
-    print("=" * 40)
-    
-    # Tentar correção simples primeiro
-    if fix_database_file():
-        print("\n✅ Correção aplicada!")
-        print("💡 Tente executar novamente: python app/main.py")
-    else:
-        print("\n🔧 Criando arquivo database.py completamente novo...")
-        
-        # Criar arquivo novo
-        database_file = Path("app/database.py")
-        if not database_file.parent.exists():
-            database_file = Path("database.py")
-        
-        # Fazer backup se existir
-        if database_file.exists():
-            backup = database_file.parent / f"{database_file.stem}_old.py"
-            database_file.rename(backup)
-            print(f"📁 Backup criado: {backup}")
-        
-        # Criar novo arquivo
-        with open(database_file, 'w', encoding='utf-8') as f:
-            f.write(create_fixed_database_content())
-        
-        print(f"✅ Novo database.py criado: {database_file}")
-        print("💡 Tente executar novamente: python app/main.py")
+        print(f"❌ Erro no sistema local: {e}")
+        return False
 
 if __name__ == "__main__":
-    main()
+    print("🚀 DIAGNÓSTICO COMPLETO - SISTEMA HVAC")
+    print("=" * 60)
+    
+    # Carregar .env se existir
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        print("✅ Arquivo .env carregado")
+    except ImportError:
+        print("⚠️  python-dotenv não instalado - usando variáveis do sistema")
+    except Exception:
+        print("⚠️  Arquivo .env não encontrado")
+    
+    # Testar AWS
+    aws_ok = test_aws_connection()
+    
+    # Testar local
+    local_ok = test_local_fallback()
+    
+    print("\n" + "=" * 60)
+    print("📊 RESULTADO FINAL:")
+    print(f"   AWS S3: {'✅ FUNCIONANDO' if aws_ok else '❌ COM PROBLEMAS'}")
+    print(f"   Local: {'✅ FUNCIONANDO' if local_ok else '❌ COM PROBLEMAS'}")
+    
+    if aws_ok:
+        print("\n🎯 RECOMENDAÇÃO: Use AWS S3 (já configurado)")
+    elif local_ok:
+        print("\n🎯 RECOMENDAÇÃO: Use sistema local (AWS com problemas)")
+        print("   Corrija AWS depois, sistema funcionará localmente")
+    else:
+        print("\n🚨 PROBLEMA CRÍTICO: Nem AWS nem local funcionando!")
+        print("   Verifique permissões de pasta e configurações")
+
+# Executar teste
+test_aws_connection()

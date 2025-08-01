@@ -33,8 +33,7 @@ api.interceptors.response.use(
       console.error('🔍 Endpoint não encontrado:', error.config?.url);
     }
     
-    // 🚨 REMOVIDO: Não fazer health check automático aqui
-    // ❌ NÃO FAZER: healthAPI.check() 
+
     
     return Promise.reject(error);
   }

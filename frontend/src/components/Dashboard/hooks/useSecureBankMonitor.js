@@ -433,6 +433,25 @@ export const useSecureBankMonitor = () => {
       }
     };
   }, []);
+  const getBoletosList = useCallback(async (filters = {}) => {
+  const { bankName, status } = filters;
+  let endpoint = '/bank/boletos';
+  
+  const params = new URLSearchParams();
+  if (bankName && bankName !== 'TODOS') {
+    params.append('bankName', bankName);
+  }
+  if (status && status !== 'TODOS') {
+    params.append('status', status);
+  }
+  
+  if (params.toString()) {
+    endpoint += `?${params.toString()}`;
+  }
+  
+  const result = await makeControlledRequest(endpoint);
+  return result;
+}, [makeControlledRequest]);
 
   // 🎯 API pública do hook - EXPANDIDA
   return {
@@ -450,6 +469,7 @@ export const useSecureBankMonitor = () => {
     verificarTodosBoletos,
     getEstatisticas,
     getAuthToken,
+    getBoletosList,
     
     // 🚨 NOVAS FUNÇÕES: Controle manual
     manualInit,
