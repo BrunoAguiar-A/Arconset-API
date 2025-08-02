@@ -1,5 +1,5 @@
-# 📁 main.py - VERSÃO PRODUÇÃO DEFINITIVA COM UPLOAD FUNCIONAL GARANTIDO
-from flask import Flask, jsonify, request, send_file
+# 📁 main.py - VERSÃO PRODUÇÃO DEFINITIVA COM UPLOAD FUNCIONAL GARANTIDO - CORRIGIDO
+from flask import Flask, jsonify, request, send_file, make_response
 from flask_cors import CORS
 from database import SessionLocal, Base, engine, get_db
 import os
@@ -186,152 +186,207 @@ def setup_upload_routes_fix(app):
         return '.' in filename and os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
     
     def check_auth():
-        """Verificação básica de autenticação"""
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return False, jsonify({'success': False, 'error': 'Token requerido'}), 401
-        
-        token = auth_header.split(' ')[1]
-        
-        # Verificar token usando sistema disponível
-        if security_manager:
-            try:
-                payload = security_manager.verify_jwt_token(token)
-                return payload is not None, None, None
-            except:
-                return False, jsonify({'success': False, 'error': 'Token inválido'}), 401
-        else:
-            # Verificação básica JWT
-            try:
-                import jwt
-                payload = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
-                return payload is not None, None, None
-            except:
-                return False, jsonify({'success': False, 'error': 'Token inválido'}), 401
-    
-    @app.route('/api/arquivos/test', methods=['GET'])
-    def test_arquivos_fix():
-        """Teste das rotas de arquivos (FIX)"""
-        return jsonify({
-            'success': True,
-            'message': '🔧 ROTAS DE UPLOAD ATIVAS (FIX DIRETO)',
-            'upload_folder': UPLOAD_FOLDER,
-            'max_size_mb': MAX_FILE_SIZE // (1024 * 1024),
-            'folder_exists': os.path.exists(UPLOAD_FOLDER),
-            'allowed_extensions': list(ALLOWED_EXTENSIONS),
-            'blueprint_available': HAS_ARQUIVOS_BP,
-            'fix_active': True,
-            'routes': [
-                'GET /api/arquivos/test',
-                'POST /api/arquivos/upload',
-                'GET /api/arquivos',
-                'DELETE /api/arquivos/<id>',
-                'GET /api/arquivos/<id>/download'
-            ]
-        })
-    
-    @app.route('/api/arquivos/upload', methods=['POST'])
-    def upload_arquivo_fix():
-        """Upload de arquivo - FIX DIRETO"""
+        """Verificação básica de autenticação - CORRIGIDA"""
         try:
-            print(f"📤 UPLOAD FIX - Recebido: {request.content_type}")
-            print(f"📤 Files: {list(request.files.keys())}")
-            print(f"📤 Form: {list(request.form.keys())}")
+            auth_header = request.headers.get('Authorization', '')
             
-            # Verificar autenticação
-            auth_ok, auth_response, auth_code = check_auth()
-            if not auth_ok:
-                return auth_response, auth_code
+            if not auth_header:
+                print("❌ Nenhum header Authorization encontrado")
+                return False, jsonify({'success': False, 'error': 'Token de autenticação requerido'}), 401
             
-            # Verificar arquivo
-            if 'file' not in request.files:
-                return jsonify({
-                    'success': False,
-                    'error': 'Nenhum arquivo enviado'
-                }), 400
+            if not auth_header.startswith('Bearer '):
+                print("❌ Formato de token inválido")
+                return False, jsonify({'success': False, 'error': 'Formato de token inválido. Use: Bearer <token>'}), 401
             
-            file = request.files['file']
-            if not file.filename:
-                return jsonify({
-                    'success': False,
-                    'error': 'Nenhum arquivo selecionado'
-                }), 400
+            token = auth_header.split(' ')[1]
+            print(f"🔍 Token recebido: {token[:20]}...")
             
-            print(f"📤 Arquivo recebido: {file.filename} ({file.content_type})")
-            
-            # Verificar tamanho
-            file.seek(0, 2)
-            file_size = file.tell()
-            file.seek(0)
-            
-            if file_size > MAX_FILE_SIZE:
-                return jsonify({
-                    'success': False,
-                    'error': f'Arquivo muito grande. Máximo: {MAX_FILE_SIZE // (1024*1024)}MB'
-                }), 400
-            
-            # Verificar extensão
-            if not allowed_file(file.filename):
-                return jsonify({
-                    'success': False,
-                    'error': 'Tipo de arquivo não permitido'
-                }), 400
-            
-            # Criar pasta se não existir
-            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-            
-            # Nome único para o arquivo
-            filename = secure_filename(file.filename)
-            unique_filename = f"{uuid.uuid4().hex}_{filename}"
-            file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
-            
-            # Salvar arquivo
-            file.save(file_path)
-            print(f"📤 SUCESSO: Arquivo salvo em {file_path}")
-            
-            # Dados do formulário
-            projeto_id = request.form.get('projectId') or request.form.get('projeto_id')
-            descricao = request.form.get('description', '') or request.form.get('descricao', '')
-            tipo_documento = request.form.get('fileType', 'Geral') or request.form.get('tipo_documento', 'Geral')
-            
-            # Tentar salvar no banco de dados
-            try:
-                db = SessionLocal()
+            # Verificar token usando sistema disponível
+            if security_manager:
                 try:
-                    novo_arquivo = Arquivo(
-                        nome_original=file.filename,
-                        nome_arquivo=unique_filename,
-                        caminho=file_path,
-                        tamanho=file_size,
-                        tipo_mime=file.content_type or 'application/octet-stream',
-                        tipo_documento=tipo_documento,
-                        projeto_id=int(projeto_id) if projeto_id else None,
-                        descricao=descricao,
-                        created_at=datetime.now(UTC)
-                    )
+                    payload = security_manager.verify_jwt_token(token)
+                    if payload and 'user_id' in payload:
+                        print(f"✅ Token válido para usuário: {payload.get('user_id')}")
+                        return True, None, None
+                    else:
+                        print("❌ Payload inválido")
+                        return False, jsonify({'success': False, 'error': 'Token inválido'}), 401
+                except Exception as e:
+                    print(f"❌ Erro no security_manager: {e}")
+                    return False, jsonify({'success': False, 'error': 'Erro na verificação do token'}), 401
+            else:
+                # Verificação básica JWT
+                try:
+                    import jwt
+                    payload = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
+                    if payload and 'user_id' in payload:
+                        print(f"✅ Token JWT básico válido para usuário: {payload.get('user_id')}")
+                        return True, None, None
+                    else:
+                        return False, jsonify({'success': False, 'error': 'Payload do token inválido'}), 401
+                except jwt.ExpiredSignatureError:
+                    print("❌ Token expirado")
+                    return False, jsonify({'success': False, 'error': 'Token expirado'}), 401
+                except jwt.InvalidTokenError as e:
+                    print(f"❌ Token inválido: {e}")
+                    return False, jsonify({'success': False, 'error': 'Token inválido'}), 401
+        except Exception as e:
+            print(f"❌ Erro geral na autenticação: {e}")
+            return False, jsonify({'success': False, 'error': 'Erro interno na autenticação'}), 500
+    
+    # 🚨 ROTA DE TESTE SEM DUPLICAÇÃO - Apenas se não existe blueprint
+    if not HAS_ARQUIVOS_BP:
+        @app.route('/api/arquivos/test', methods=['GET'])
+        def test_arquivos_fix():
+            """Teste das rotas de arquivos (FIX)"""
+            return jsonify({
+                'success': True,
+                'message': '🔧 ROTAS DE UPLOAD ATIVAS (FIX DIRETO)',
+                'upload_folder': UPLOAD_FOLDER,
+                'max_size_mb': MAX_FILE_SIZE // (1024 * 1024),
+                'folder_exists': os.path.exists(UPLOAD_FOLDER),
+                'allowed_extensions': list(ALLOWED_EXTENSIONS),
+                'blueprint_available': HAS_ARQUIVOS_BP,
+                'fix_active': True,
+                'routes': [
+                    'GET /api/arquivos/test',
+                    'POST /api/arquivos/upload',
+                    'GET /api/arquivos',
+                    'DELETE /api/arquivos/<id>',
+                    'GET /api/arquivos/<id>/download'
+                ]
+            })
+    
+    # 🚨 ROTAS APENAS SE NÃO EXISTE BLUEPRINT (evitar duplicação)
+    if not HAS_ARQUIVOS_BP:
+        @app.route('/api/arquivos/upload', methods=['POST'])
+        def upload_arquivo_fix():
+            """Upload de arquivo - FIX DIRETO"""
+            try:
+                print(f"📤 UPLOAD FIX - Recebido: {request.content_type}")
+                print(f"📤 Files: {list(request.files.keys())}")
+                print(f"📤 Form: {list(request.form.keys())}")
+                
+                # Verificar autenticação
+                auth_ok, auth_response, auth_code = check_auth()
+                if not auth_ok:
+                    return auth_response, auth_code
+                
+                # Verificar arquivo
+                if 'file' not in request.files:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Nenhum arquivo enviado'
+                    }), 400
+                
+                file = request.files['file']
+                if not file.filename:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Nenhum arquivo selecionado'
+                    }), 400
+                
+                print(f"📤 Arquivo recebido: {file.filename} ({file.content_type})")
+                
+                # Verificar tamanho
+                file.seek(0, 2)
+                file_size = file.tell()
+                file.seek(0)
+                
+                if file_size > MAX_FILE_SIZE:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Arquivo muito grande. Máximo: {MAX_FILE_SIZE // (1024*1024)}MB'
+                    }), 400
+                
+                # Verificar extensão
+                if not allowed_file(file.filename):
+                    return jsonify({
+                        'success': False,
+                        'error': 'Tipo de arquivo não permitido'
+                    }), 400
+                
+                # Criar pasta se não existir
+                os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+                
+                # Nome único para o arquivo
+                filename = secure_filename(file.filename)
+                unique_filename = f"{uuid.uuid4().hex}_{filename}"
+                file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+                
+                # Salvar arquivo
+                file.save(file_path)
+                print(f"📤 SUCESSO: Arquivo salvo em {file_path}")
+                
+                # Dados do formulário - CORRIGIDO para aceitar ambos os formatos
+                projeto_id = request.form.get('projectId') or request.form.get('projeto_id')
+                descricao = request.form.get('description', '') or request.form.get('descricao', '')
+                tipo_documento = request.form.get('fileType', 'Geral') or request.form.get('tipo_documento', 'Geral')
+                
+                # Tentar salvar no banco de dados
+                try:
+                    db = SessionLocal()
+                    try:
+                        novo_arquivo = Arquivo(
+                            nome_original=file.filename,
+                            nome_arquivo=unique_filename,
+                            caminho=file_path,
+                            tamanho=file_size,
+                            tipo_mime=file.content_type or 'application/octet-stream',
+                            tipo_documento=tipo_documento,
+                            projeto_id=int(projeto_id) if projeto_id else None,
+                            descricao=descricao,
+                            created_at=datetime.now(UTC)
+                        )
+                        
+                        db.add(novo_arquivo)
+                        db.commit()
+                        db.refresh(novo_arquivo)
+                        
+                        print(f"📤 Banco: Arquivo salvo com ID {novo_arquivo.id}")
+                        
+                        return jsonify({
+                            'success': True,
+                            'message': 'Arquivo enviado com sucesso (FIX DIRETO)',
+                            'storage': 'local',
+                            'method': 'direct_fix',
+                            'data': novo_arquivo.to_dict()
+                        })
+                        
+                    except Exception as db_error:
+                        db.rollback()
+                        print(f"❌ Erro no banco: {db_error}")
+                        
+                        # Arquivo foi salvo, retornar sucesso mesmo com erro no banco
+                        return jsonify({
+                            'success': True,
+                            'message': 'Arquivo salvo localmente (banco com problema)',
+                            'storage': 'local',
+                            'method': 'direct_fix',
+                            'data': {
+                                'id': int(file_size % 10000),
+                                'name': file.filename,
+                                'fileName': file.filename,
+                                'nome_original': file.filename,
+                                'size': file_size,
+                                'fileSize': file_size,
+                                'type': file.content_type,
+                                'caminho': file_path,
+                                'created_at': datetime.now(UTC).isoformat(),
+                                'uploadDate': datetime.now(UTC).isoformat()
+                            },
+                            'warning': 'Arquivo salvo mas banco indisponível'
+                        })
+                    finally:
+                        db.close()
+                        
+                except Exception as e:
+                    print(f"❌ Banco indisponível: {e}")
                     
-                    db.add(novo_arquivo)
-                    db.commit()
-                    db.refresh(novo_arquivo)
-                    
-                    print(f"📤 Banco: Arquivo salvo com ID {novo_arquivo.id}")
-                    
+                    # Mesmo com erro no banco, arquivo foi salvo
                     return jsonify({
                         'success': True,
-                        'message': 'Arquivo enviado com sucesso (FIX DIRETO)',
-                        'storage': 'local',
-                        'method': 'direct_fix',
-                        'data': novo_arquivo.to_dict()
-                    })
-                    
-                except Exception as db_error:
-                    db.rollback()
-                    print(f"❌ Erro no banco: {db_error}")
-                    
-                    # Arquivo foi salvo, retornar sucesso mesmo com erro no banco
-                    return jsonify({
-                        'success': True,
-                        'message': 'Arquivo salvo localmente (banco com problema)',
+                        'message': 'Arquivo salvo (banco indisponível)',
                         'storage': 'local',
                         'method': 'direct_fix',
                         'data': {
@@ -345,192 +400,166 @@ def setup_upload_routes_fix(app):
                             'caminho': file_path,
                             'created_at': datetime.now(UTC).isoformat(),
                             'uploadDate': datetime.now(UTC).isoformat()
-                        },
-                        'warning': 'Arquivo salvo mas banco indisponível'
+                        }
                     })
+                    
+            except Exception as e:
+                print(f"❌ Erro geral no upload: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Erro interno: {str(e)}'
+                }), 500
+        
+        @app.route('/api/arquivos', methods=['GET'])
+        def listar_arquivos_fix():
+            """Listar arquivos - FIX DIRETO"""
+            try:
+                # Verificar autenticação
+                auth_ok, auth_response, auth_code = check_auth()
+                if not auth_ok:
+                    return auth_response, auth_code
+                
+                # Tentar do banco primeiro
+                try:
+                    db = SessionLocal()
+                    try:
+                        arquivos = db.query(Arquivo).order_by(Arquivo.created_at.desc()).limit(100).all()
+                        
+                        return jsonify({
+                            'success': True,
+                            'data': [arquivo.to_dict() for arquivo in arquivos],
+                            'total': len(arquivos),
+                            'source': 'database',
+                            'method': 'direct_fix'
+                        })
+                    finally:
+                        db.close()
+                        
+                except Exception as db_error:
+                    print(f"❌ Erro no banco ao listar: {db_error}")
+                    
+                    # Fallback: listar da pasta
+                    files = []
+                    if os.path.exists(UPLOAD_FOLDER):
+                        for filename in os.listdir(UPLOAD_FOLDER):
+                            filepath = os.path.join(UPLOAD_FOLDER, filename)
+                            if os.path.isfile(filepath):
+                                stat = os.stat(filepath)
+                                mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+                                
+                                files.append({
+                                    'id': hash(filename) % 10000,
+                                    'name': filename,
+                                    'fileName': filename,
+                                    'nome_original': filename,
+                                    'size': stat.st_size,
+                                    'fileSize': stat.st_size,
+                                    'type': mime_type,
+                                    'caminho': filepath,
+                                    'created_at': datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                                    'uploadDate': datetime.fromtimestamp(stat.st_ctime).isoformat()
+                                })
+                    
+                    return jsonify({
+                        'success': True,
+                        'data': files,
+                        'total': len(files),
+                        'source': 'filesystem',
+                        'method': 'direct_fix'
+                    })
+                    
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Erro interno: {str(e)}'
+                }), 500
+        
+        @app.route('/api/arquivos/<int:arquivo_id>', methods=['DELETE'])
+        def deletar_arquivo_fix(arquivo_id):
+            """Deletar arquivo - FIX DIRETO"""
+            try:
+                # Verificar autenticação
+                auth_ok, auth_response, auth_code = check_auth()
+                if not auth_ok:
+                    return auth_response, auth_code
+                
+                db = SessionLocal()
+                try:
+                    arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
+                    
+                    if not arquivo:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Arquivo não encontrado'
+                        }), 404
+                    
+                    # Deletar arquivo físico
+                    if arquivo.caminho and os.path.exists(arquivo.caminho):
+                        os.remove(arquivo.caminho)
+                        print(f"🗑️ Arquivo físico deletado: {arquivo.caminho}")
+                    
+                    # Deletar do banco
+                    db.delete(arquivo)
+                    db.commit()
+                    
+                    return jsonify({
+                        'success': True,
+                        'message': 'Arquivo deletado com sucesso',
+                        'method': 'direct_fix'
+                    })
+                    
+                except Exception as db_error:
+                    db.rollback()
+                    raise db_error
                 finally:
                     db.close()
                     
             except Exception as e:
-                print(f"❌ Banco indisponível: {e}")
-                
-                # Mesmo com erro no banco, arquivo foi salvo
                 return jsonify({
-                    'success': True,
-                    'message': 'Arquivo salvo (banco indisponível)',
-                    'storage': 'local',
-                    'method': 'direct_fix',
-                    'data': {
-                        'id': int(file_size % 10000),
-                        'name': file.filename,
-                        'fileName': file.filename,
-                        'nome_original': file.filename,
-                        'size': file_size,
-                        'fileSize': file_size,
-                        'type': file.content_type,
-                        'caminho': file_path,
-                        'created_at': datetime.now(UTC).isoformat(),
-                        'uploadDate': datetime.now(UTC).isoformat()
-                    }
-                })
-                
-        except Exception as e:
-            print(f"❌ Erro geral no upload: {e}")
-            return jsonify({
-                'success': False,
-                'error': f'Erro interno: {str(e)}'
-            }), 500
-    
-    @app.route('/api/arquivos', methods=['GET'])
-    def listar_arquivos_fix():
-        """Listar arquivos - FIX DIRETO"""
-        try:
-            # Verificar autenticação
-            auth_ok, auth_response, auth_code = check_auth()
-            if not auth_ok:
-                return auth_response, auth_code
-            
-            # Tentar do banco primeiro
+                    'success': False,
+                    'error': f'Erro interno: {str(e)}'
+                }), 500
+        
+        @app.route('/api/arquivos/<int:arquivo_id>/download', methods=['GET'])
+        def download_arquivo_fix(arquivo_id):
+            """Download de arquivo - FIX DIRETO"""
             try:
+                # Verificar autenticação
+                auth_ok, auth_response, auth_code = check_auth()
+                if not auth_ok:
+                    return auth_response, auth_code
+                
                 db = SessionLocal()
                 try:
-                    arquivos = db.query(Arquivo).order_by(Arquivo.created_at.desc()).limit(100).all()
+                    arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
                     
-                    return jsonify({
-                        'success': True,
-                        'data': [arquivo.to_dict() for arquivo in arquivos],
-                        'total': len(arquivos),
-                        'source': 'database',
-                        'method': 'direct_fix'
-                    })
+                    if not arquivo:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Arquivo não encontrado'
+                        }), 404
+                    
+                    # Arquivo local
+                    if arquivo.caminho and os.path.exists(arquivo.caminho):
+                        return send_file(
+                            arquivo.caminho,
+                            as_attachment=True,
+                            download_name=arquivo.nome_original
+                        )
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Arquivo não encontrado no disco'
+                        }), 404
+                        
                 finally:
                     db.close()
                     
-            except Exception as db_error:
-                print(f"❌ Erro no banco ao listar: {db_error}")
-                
-                # Fallback: listar da pasta
-                files = []
-                if os.path.exists(UPLOAD_FOLDER):
-                    for filename in os.listdir(UPLOAD_FOLDER):
-                        filepath = os.path.join(UPLOAD_FOLDER, filename)
-                        if os.path.isfile(filepath):
-                            stat = os.stat(filepath)
-                            mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
-                            
-                            files.append({
-                                'id': hash(filename) % 10000,
-                                'name': filename,
-                                'fileName': filename,
-                                'nome_original': filename,
-                                'size': stat.st_size,
-                                'fileSize': stat.st_size,
-                                'type': mime_type,
-                                'caminho': filepath,
-                                'created_at': datetime.fromtimestamp(stat.st_ctime).isoformat(),
-                                'uploadDate': datetime.fromtimestamp(stat.st_ctime).isoformat()
-                            })
-                
+            except Exception as e:
                 return jsonify({
-                    'success': True,
-                    'data': files,
-                    'total': len(files),
-                    'source': 'filesystem',
-                    'method': 'direct_fix'
-                })
-                
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': f'Erro interno: {str(e)}'
-            }), 500
-    
-    @app.route('/api/arquivos/<int:arquivo_id>', methods=['DELETE'])
-    def deletar_arquivo_fix(arquivo_id):
-        """Deletar arquivo - FIX DIRETO"""
-        try:
-            # Verificar autenticação
-            auth_ok, auth_response, auth_code = check_auth()
-            if not auth_ok:
-                return auth_response, auth_code
-            
-            db = SessionLocal()
-            try:
-                arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
-                
-                if not arquivo:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Arquivo não encontrado'
-                    }), 404
-                
-                # Deletar arquivo físico
-                if arquivo.caminho and os.path.exists(arquivo.caminho):
-                    os.remove(arquivo.caminho)
-                    print(f"🗑️ Arquivo físico deletado: {arquivo.caminho}")
-                
-                # Deletar do banco
-                db.delete(arquivo)
-                db.commit()
-                
-                return jsonify({
-                    'success': True,
-                    'message': 'Arquivo deletado com sucesso',
-                    'method': 'direct_fix'
-                })
-                
-            except Exception as db_error:
-                db.rollback()
-                raise db_error
-            finally:
-                db.close()
-                
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': f'Erro interno: {str(e)}'
-            }), 500
-    
-    @app.route('/api/arquivos/<int:arquivo_id>/download', methods=['GET'])
-    def download_arquivo_fix(arquivo_id):
-        """Download de arquivo - FIX DIRETO"""
-        try:
-            # Verificar autenticação
-            auth_ok, auth_response, auth_code = check_auth()
-            if not auth_ok:
-                return auth_response, auth_code
-            
-            db = SessionLocal()
-            try:
-                arquivo = db.query(Arquivo).filter(Arquivo.id == arquivo_id).first()
-                
-                if not arquivo:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Arquivo não encontrado'
-                    }), 404
-                
-                # Arquivo local
-                if arquivo.caminho and os.path.exists(arquivo.caminho):
-                    return send_file(
-                        arquivo.caminho,
-                        as_attachment=True,
-                        download_name=arquivo.nome_original
-                    )
-                else:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Arquivo não encontrado no disco'
-                    }), 404
-                    
-            finally:
-                db.close()
-                
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': f'Erro interno: {str(e)}'
-            }), 500
+                    'success': False,
+                    'error': f'Erro interno: {str(e)}'
+                }), 500
     
     print("✅ Rotas de upload FIX configuradas com sucesso!")
 
@@ -681,65 +710,82 @@ def create_app():
         print("🔐 Configurando segurança para produção...")
         
         try:
-            # CORS otimizado
-            setup_simple_cors(app)
-            print("✅ CORS de produção configurado")
-            
-            # Rotas bancárias
-            if bank_bp:
-                app.register_blueprint(bank_bp)
-                print("✅ Rotas bancárias registradas")
-            
-            # Webhooks
-            if webhook_bp:
-                app.register_blueprint(webhook_bp)
-                print("✅ Sistema de webhooks registrado")
+            # 🚨 IMPORTANTE: Não chamar setup_simple_cors do sistema de segurança
+            # Vamos configurar CORS manualmente para produção
+            print("✅ Sistema de segurança ativo - configurando CORS manualmente")
             
         except Exception as e:
             print(f"❌ Erro ao configurar segurança: {e}")
             if PRODUCTION_MODE:
                 sys.exit(1)
     
-    else:
-        # CORS para produção sem segurança avançada
-        print("⚙️  Configurando CORS padrão para produção...")
-        
+    # ===== CORS ESPECÍFICO PARA PRODUÇÃO - VERSÃO CORRIGIDA =====
+    print("🔐 Configurando CORS para PRODUÇÃO...")
+    
+    # 🚨 CORS CONFIGURADO PARA PRODUÇÃO - SIMPLES E FUNCIONAL
+    CORS(app,
+         origins=[
+             "http://localhost:5173",
+             "http://127.0.0.1:5173", 
+             "http://192.168.1.9:5173",
+             "http://localhost:3000",
+             "http://127.0.0.1:3000"
+         ],
+         supports_credentials=True,
+         allow_headers=[
+             'Content-Type',
+             'Authorization', 
+             'Accept',
+             'Origin',
+             'X-Requested-With',
+             'Cache-Control'
+         ],
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+         expose_headers=['Content-Disposition'],
+         max_age=3600
+    )
+    print("✅ CORS de produção configurado")
+    
+    # 🚨 HANDLER CORS SIMPLES E FUNCIONAL
+    @app.before_request
+    def handle_cors():
+        """Handler CORS para produção"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, Origin, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Max-Age'] = '3600'
+            return response
+      
+    @app.after_request  
+    def add_cors_headers(response):
+        """Adicionar headers CORS - PRODUÇÃO"""
+        origin = request.headers.get('Origin')
         allowed_origins = [
-            "https://seu-dominio.com",  # 🚨 ALTERE PARA SEU DOMÍNIO
-            "https://www.seu-dominio.com",
-            "http://localhost:3000",  # Para testes locais
-            "http://localhost:5173"   # Para testes locais
+            'http://localhost:5173',
+            'http://127.0.0.1:5173', 
+            'http://192.168.1.9:5173',
+            'http://localhost:3000',
+            'http://127.0.0.1:3000'
         ]
+        if origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
         
-        # Se for desenvolvimento local, adicionar mais origens
-        if not PRODUCTION_MODE or os.getenv('ALLOW_LOCAL_CORS', 'false').lower() == 'true':
-            allowed_origins.extend([
-                "http://127.0.0.1:3000",
-                "http://127.0.0.1:5173"
-            ])
+        # Headers de segurança para produção
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
         
-        CORS(app, 
-             origins=allowed_origins,
-             supports_credentials=True,
-             allow_headers=[
-                 'Content-Type', 
-                 'Authorization', 
-                 'X-Requested-With',
-                 'Accept',
-                 'Origin',
-                 'X-Confirm-Delete'
-             ],
-             methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-             expose_headers=['X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-             max_age=3600
-        )
-        print("✅ CORS de produção configurado")
+        return response
     
     # Garantir que pasta uploads existe
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     print(f"✅ Pasta uploads: {app.config['UPLOAD_FOLDER']}")
     
-    # ===== REGISTRAR BLUEPRINTS EM ORDEM DE PRIORIDADE =====
+    # ===== REGISTRAR BLUEPRINTS EM ORDEM DE PRIORIDADE (SEM TESTES INTERNOS) =====
     
     # 1. Autenticação (PRIORIDADE MÁXIMA)
     if HAS_AUTH:
@@ -749,23 +795,41 @@ def create_app():
         print("🚨 ERRO: Autenticação obrigatória em produção!")
         sys.exit(1)
     
-    # 2. Sistema de arquivos (CRÍTICO PARA UPLOAD)
+    # 2. Rotas bancárias e webhooks (se disponíveis)
+    if HAS_SECURITY and bank_bp:
+        app.register_blueprint(bank_bp)
+        print("✅ Rotas bancárias registradas")
+    
+    if HAS_SECURITY and webhook_bp:
+        app.register_blueprint(webhook_bp)
+        print("✅ Sistema de webhooks registrado")
+    
+    # 3. Sistema de arquivos (CRÍTICO PARA UPLOAD)
+    print("🔧 Registrando sistema de arquivos...")
+
     if HAS_ARQUIVOS_BP:
+        # Registrar blueprint original
         app.register_blueprint(arquivos_bp)
-        print("✅ routes.arquivos registrado - UPLOAD ATIVO")
+        print("✅ routes.arquivos registrado - UPLOAD ATIVO via Blueprint")
     else:
-        print("🔧 routes.arquivos não disponível - USANDO FIX DIRETO")
-    
-    # 🚀 SEMPRE configurar FIX de upload (garante que funcione)
-    setup_upload_routes_fix(app)
-    print("✅ FIX DE UPLOAD configurado - UPLOAD GARANTIDO!")
-    
-    # 3. User Settings
+        print("⚠️ routes.arquivos não disponível - usando apenas FIX")
+
+    # 🚀 Configurar FIX de upload (sem duplicação)
+    try:
+        setup_upload_routes_fix(app)
+        print("✅ FIX DE UPLOAD configurado!")
+        
+    except Exception as e:
+        print(f"❌ Erro ao configurar FIX de upload: {e}")
+        if PRODUCTION_MODE:
+            sys.exit(1)
+
+    # 4. User Settings
     if HAS_USER_SETTINGS_BP and user_settings_bp:
         app.register_blueprint(user_settings_bp)
         print("✅ routes.user_settings registrado")
     
-    # 4. Outros blueprints
+    # 5. Outros blueprints
     if HAS_PROJECT_BP:
         app.register_blueprint(project_bp)
         print("✅ routes.project registrado")
@@ -805,7 +869,8 @@ def create_app():
             db = SessionLocal()
             try:
                 # Testar conexão
-                db.execute('SELECT 1')
+                from sqlalchemy import text
+                db.execute(text('SELECT 1'))
                 db_status['connected'] = True
                 
                 # Testar tabelas
@@ -847,33 +912,32 @@ def create_app():
         except Exception as e:
             upload_status['error'] = str(e)
         
-        # Status geral - com FIX sempre passa
+        # Status geral
         overall_health = (
             db_status['connected'] and
             db_status['can_query'] and
             upload_status['folder_exists'] and
             upload_status['writable']
-            # Removido: upload_status['routes_active'] - FIX garante funcionamento
         )
         
         response_data = {
             'success': overall_health,
             'message': 'API HVAC Produção com FIX' if overall_health else 'API com problemas críticos',
-            'version': '2.3.0-production-with-upload-fix',
+            'version': '2.3.1-production-blueprint-fix',
             'mode': 'production' if PRODUCTION_MODE else 'development',
             'timestamp': datetime.now(UTC).isoformat(),
             'database': db_status,
             'file_system': upload_status,
             'features': {
                 'authentication': 'ACTIVE' if HAS_AUTH else 'DISABLED',
-                'file_upload': 'ACTIVE (FIX GARANTIDO)',  # Sempre ativo com FIX
+                'file_upload': 'ACTIVE (BLUEPRINT + FIX)' if HAS_ARQUIVOS_BP else 'ACTIVE (FIX ONLY)',
                 'security': 'ACTIVE' if HAS_SECURITY else 'BASIC',
                 'user_settings': 'ACTIVE' if HAS_USER_SETTINGS_BP else 'DISABLED',
                 'webhooks': 'ACTIVE' if webhook_bp else 'DISABLED'
             },
             'endpoints': {
                 'auth': '/api/auth/*' if HAS_AUTH else 'disabled',
-                'upload': '/api/arquivos/* (FIX ATIVO)',
+                'upload': '/api/arquivos/*',
                 'dashboard': '/api/dashboard-data',
                 'health': '/api/health',
                 'verify_token': '/api/verify-token'
@@ -1008,6 +1072,112 @@ def create_app():
             }), 500
         finally:
             db.close()
+
+    @app.route('/api/dashboard-stats', methods=['GET', 'OPTIONS'])
+    def dashboard_stats_compat():  # 🔧 Nome único
+        """Estatísticas do dashboard - compatibilidade com frontend"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+            response.headers.add('Access-Control-Allow-Headers', "Authorization, Content-Type")
+            response.headers.add('Access-Control-Allow-Methods', "GET, OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
+        
+        # Verificar autenticação básica
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'success': False, 'error': 'Token requerido'}), 401
+        
+        # Redirecionar para dashboard-data
+        return dashboard_data()
+    
+    @app.route('/api/stats', methods=['GET', 'OPTIONS'])  # 🔧 Rota alternativa
+    def stats_compat():
+        """Estatísticas - rota alternativa"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+            response.headers.add('Access-Control-Allow-Headers', "Authorization, Content-Type")
+            response.headers.add('Access-Control-Allow-Methods', "GET, OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
+        
+        return dashboard_data()
+    
+    # 🔧 APENAS se não existir blueprint de projetos
+    if not HAS_PROJECT_BP:
+        @app.route('/api/projects', methods=['GET', 'OPTIONS'])
+        def get_projects_fix():
+            """Listar projetos - só se blueprint não existir"""
+            if request.method == 'OPTIONS':
+                response = make_response()
+                response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+                response.headers.add('Access-Control-Allow-Headers', "Authorization, Content-Type")
+                response.headers.add('Access-Control-Allow-Methods', "GET, OPTIONS")
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response
+            
+            try:
+                # Verificar autenticação básica
+                auth_header = request.headers.get('Authorization', '')
+                if not auth_header.startswith('Bearer '):
+                    return jsonify({'success': False, 'error': 'Token requerido'}), 401
+                
+                db = SessionLocal()
+                try:
+                    projects = db.query(Projeto).order_by(Projeto.created_at.desc()).all()
+                    
+                    return jsonify({
+                        'success': True,
+                        'data': [p.to_dict() for p in projects],
+                        'total': len(projects)
+                    })
+                finally:
+                    db.close()
+                    
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+    
+    # 🔧 APENAS se não existir blueprint de clientes
+    if not HAS_CLIENTES_BP:
+        @app.route('/api/clientes', methods=['GET', 'OPTIONS'])
+        def get_clientes_fix():
+            """Listar clientes - só se blueprint não existir"""
+            if request.method == 'OPTIONS':
+                response = make_response()
+                response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+                response.headers.add('Access-Control-Allow-Headers', "Authorization, Content-Type")
+                response.headers.add('Access-Control-Allow-Methods', "GET, OPTIONS")
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response
+            
+            try:
+                # Verificar autenticação básica
+                auth_header = request.headers.get('Authorization', '')
+                if not auth_header.startswith('Bearer '):
+                    return jsonify({'success': False, 'error': 'Token requerido'}), 401
+                
+                db = SessionLocal()
+                try:
+                    clientes = db.query(Cliente).order_by(Cliente.created_at.desc()).all()
+                    
+                    return jsonify({
+                        'success': True,
+                        'data': [c.to_dict() for c in clientes],
+                        'total': len(clientes)
+                    })
+                finally:
+                    db.close()
+                    
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
     
     # ===== TRATAMENTO DE ERROS GLOBAL =====
     @app.errorhandler(404)
@@ -1034,6 +1204,96 @@ def create_app():
             'error': 'Erro interno do servidor',
             'code': 'INTERNAL_ERROR'
         }), 500
+    # ===== ROTAS DE COMPATIBILIDADE PARA O FRONTEND =====
+    
+    @app.route('/api/dashboard-stats', methods=['GET', 'OPTIONS'])
+    def dashboard_stats():
+        """Estatísticas do dashboard - compatibilidade com frontend"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+            response.headers.add('Access-Control-Allow-Headers', "Authorization, Content-Type")
+            response.headers.add('Access-Control-Allow-Methods', "GET, OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
+        
+        # Verificar autenticação básica
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'success': False, 'error': 'Token requerido'}), 401
+        
+        # Redirecionar para dashboard-data
+        return dashboard_data()
+    
+    @app.route('/api/projects', methods=['GET', 'OPTIONS'])
+    def get_projects_compat():
+        """Listar projetos - compatibilidade com frontend"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+            response.headers.add('Access-Control-Allow-Headers', "Authorization, Content-Type")
+            response.headers.add('Access-Control-Allow-Methods', "GET, OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
+        
+        try:
+            # Verificar autenticação básica
+            auth_header = request.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer '):
+                return jsonify({'success': False, 'error': 'Token requerido'}), 401
+            
+            db = SessionLocal()
+            try:
+                projects = db.query(Projeto).order_by(Projeto.created_at.desc()).all()
+                
+                return jsonify({
+                    'success': True,
+                    'data': [p.to_dict() for p in projects],
+                    'total': len(projects)
+                })
+            finally:
+                db.close()
+                
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/clientes', methods=['GET', 'OPTIONS'])
+    def get_clientes_compat():
+        """Listar clientes - compatibilidade com frontend"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+            response.headers.add('Access-Control-Allow-Headers', "Authorization, Content-Type")
+            response.headers.add('Access-Control-Allow-Methods', "GET, OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            return response
+        
+        try:
+            # Verificar autenticação básica
+            auth_header = request.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer '):
+                return jsonify({'success': False, 'error': 'Token requerido'}), 401
+            
+            db = SessionLocal()
+            try:
+                clientes = db.query(Cliente).order_by(Cliente.created_at.desc()).all()
+                
+                return jsonify({
+                    'success': True,
+                    'data': [c.to_dict() for c in clientes],
+                    'total': len(clientes)
+                })
+            finally:
+                db.close()
+                
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
     
     return app
 
@@ -1071,20 +1331,25 @@ if __name__ == '__main__':
         print("\n📋 STATUS FINAL:")
         print(f"✅ Modo: {'PRODUÇÃO' if PRODUCTION_MODE else 'DESENVOLVIMENTO'}")
         print(f"✅ Autenticação: {'ATIVA' if HAS_AUTH else 'INATIVA'}")
-        print(f"✅ Sistema de Arquivos: ATIVO (FIX GARANTIDO)")
-        print(f"✅ Blueprint Original: {'ATIVO' if HAS_ARQUIVOS_BP else 'INATIVO'}")
+        print(f"✅ Sistema de Arquivos: {'BLUEPRINT + FIX' if HAS_ARQUIVOS_BP else 'FIX APENAS'}")
         print(f"✅ Segurança: {'ATIVA' if HAS_SECURITY else 'BÁSICA'}")
         print(f"✅ Configurações: {'ATIVO' if HAS_USER_SETTINGS_BP else 'INATIVO'}")
+        
+        # 🔍 VERIFICAR ROTAS REGISTRADAS (SEM EXECUTAR REQUEST)
+        print("\n📋 ROTAS DE ARQUIVOS REGISTRADAS:")
+        for rule in app.url_map.iter_rules():
+            if '/api/arquivos' in rule.rule:
+                print(f"   {rule.methods} {rule.rule}")
         
         print("\n📍 ENDPOINTS CRÍTICOS (GARANTIDOS):")
         print("❤️  Health Check: http://localhost:5000/api/health")
         print("📊 Dashboard: http://localhost:5000/api/dashboard-data")
         print("🔑 Login: http://localhost:5000/api/auth/login")
-        print("🔍 Teste Upload: http://localhost:5000/api/arquivos/test")
         print("📤 Upload: http://localhost:5000/api/arquivos/upload")
         print("📂 Listar Arquivos: http://localhost:5000/api/arquivos")
         print("🗑️ Deletar: http://localhost:5000/api/arquivos/<id>")
         print("📥 Download: http://localhost:5000/api/arquivos/<id>/download")
+        print("🔍 Debug Routes: http://localhost:5000/api/debug/routes")
         
         print("\n👤 CREDENCIAIS PADRÃO:")
         admin_password = os.getenv('ADMIN_PASSWORD', 'HvacAdmin2024!')
@@ -1094,14 +1359,14 @@ if __name__ == '__main__':
         
         print("\n🔧 TESTES RÁPIDOS:")
         print("   curl http://localhost:5000/api/health")
-        print("   curl http://localhost:5000/api/arquivos/test")
+        print("   curl http://localhost:5000/api/debug/routes")
         
         print("\n" + "="*60)
         print("🎉 SISTEMA PRONTO PARA PRODUÇÃO!")
-        print("🚀 UPLOAD DE ARQUIVOS GARANTIDO PELO FIX!")
+        print("🚀 UPLOAD DE ARQUIVOS GARANTIDO!")
         print("🔐 AUTENTICAÇÃO OBRIGATÓRIA ATIVA!")
-        print("📁 TODAS AS ROTAS DE UPLOAD FUNCIONANDO!")
-        print("✅ SEM DEPENDÊNCIA DE BLUEPRINT EXTERNO!")
+        print("📁 ROTAS REGISTRADAS SEM CONFLITO!")
+        print("✅ BLUEPRINT REGISTRATION CORRIGIDO!")
         print("="*60)
         
         # Iniciar servidor

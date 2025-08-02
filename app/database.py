@@ -1,11 +1,11 @@
-# 📁 database.py - COMPLETO PARA AWS RDS
+# 📁 database.py - VERSÃO ATUALIZADA COM PASTAS VIRTUAIS + AWS
 import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, Date, Numeric, ForeignKey, BigInteger, text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, Date, Numeric, ForeignKey, BigInteger, text, LargeBinary
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.sql import func
 from datetime import datetime, UTC, timezone
@@ -92,8 +92,51 @@ def get_db():
     finally:
         db.close()
 
-# ===== MODELOS COMPLETOS PARA AWS RDS =====
+# ===== NOVO MODELO: PASTAS VIRTUAIS =====
+class Pasta(Base):
+    """📁 Modelo para pastas virtuais no banco"""
+    __tablename__ = 'pastas'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String(255), nullable=False, comment='Nome da pasta')
+    descricao = Column(Text, nullable=True, comment='Descrição da pasta')
+    cor = Column(String(20), default='blue', comment='Cor da pasta na interface')
+    icone = Column(String(50), default='folder', comment='Ícone da pasta')
+    
+    # Hierarquia de pastas (pasta pai)
+    pasta_pai_id = Column(Integer, ForeignKey('pastas.id'), nullable=True)
+    pasta_pai = relationship("Pasta", remote_side=[id], back_populates="subpastas")
+    subpastas = relationship("Pasta", back_populates="pasta_pai")
+    
+    # Relacionamentos
+    arquivos = relationship("Arquivo", back_populates="pasta")
+    projeto_id = Column(Integer, ForeignKey('projetos.id'), nullable=True)
+    projeto = relationship("Projeto")
+    
+    # Metadados
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    criado_por = Column(String(100), nullable=True)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'nome': self.nome,
+            'descricao': self.descricao,
+            'cor': self.cor,
+            'icone': self.icone,
+            'pasta_pai_id': self.pasta_pai_id,
+            'pasta_pai_nome': self.pasta_pai.nome if self.pasta_pai else None,
+            'projeto_id': self.projeto_id,
+            'projeto_nome': self.projeto.nome if self.projeto else None,
+            'total_arquivos': len(self.arquivos) if self.arquivos else 0,
+            'total_subpastas': len(self.subpastas) if self.subpastas else 0,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'criado_por': self.criado_por
+        }
 
+# ===== MODELOS EXISTENTES (MANTIDOS) =====
 class Cliente(Base):
     __tablename__ = 'clientes'
     
@@ -283,33 +326,44 @@ class Conta(Base):
             'dias_vencimento': dias_vencimento
         }
 
-# ===== MODELO ARQUIVO CRÍTICO PARA UPLOAD =====
+# ===== MODELO ARQUIVO ATUALIZADO PARA AWS + PASTAS =====
 class Arquivo(Base):
     __tablename__ = 'arquivos'
     
     id = Column(Integer, primary_key=True, index=True)
     nome_original = Column(String(500), nullable=False)
     nome_arquivo = Column(String(500), nullable=False)
-    caminho = Column(String(1000), nullable=False)
     tamanho = Column(BigInteger, nullable=False, default=0)
     tipo_mime = Column(String(200), nullable=True)
     tipo_documento = Column(String(100), nullable=False, default='Geral')
     descricao = Column(Text, nullable=True)
     
-    # Relacionamentos
+    # 🆕 SISTEMA DE PASTAS VIRTUAIS
+    pasta_id = Column(Integer, ForeignKey('pastas.id'), nullable=True)
+    pasta = relationship("Pasta", back_populates="arquivos")
+    
+    # 🆕 ARMAZENAMENTO AWS HÍBRIDO
+    arquivo_blob = Column(LargeBinary, nullable=True, comment='Arquivo pequeno em binário')
+    aws_s3_key = Column(String(1000), nullable=True, comment='Chave do arquivo no S3')
+    aws_s3_bucket = Column(String(100), nullable=True, comment='Bucket do S3')
+    aws_s3_url = Column(String(2000), nullable=True, comment='URL pública do S3')
+    storage_type = Column(String(20), default='database', comment='database, s3, hybrid')
+    
+    # Relacionamentos existentes (compatibilidade)
     projeto_id = Column(Integer, ForeignKey('projetos.id'), nullable=True)
     projeto = relationship('Projeto', back_populates='arquivos')
     
-    # Campos de cloud storage (S3)
-    cloud_url = Column(String(1000), nullable=True)
-    cloud_id = Column(String(500), nullable=True)
+    # Campos antigos (manter compatibilidade)
+    caminho = Column(String(1000), nullable=True, comment='Caminho legado (compatibilidade)')
+    cloud_url = Column(String(1000), nullable=True, comment='URL legada')
+    cloud_id = Column(String(500), nullable=True, comment='ID legado')
+    tags = Column(Text, nullable=True, comment='Tags para busca')
     
-    # Tags para busca
-    tags = Column(Text, nullable=True)
-    
-    # Timestamps
+    # Metadados
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    uploaded_by = Column(String(100), nullable=True)
+    is_public = Column(Boolean, default=False, comment='Arquivo público')
     
     def to_dict(self):
         """Converter para dicionário compatível com frontend"""
@@ -319,7 +373,6 @@ class Arquivo(Base):
             'fileName': self.nome_original,
             'nome_original': self.nome_original,
             'nome_arquivo': self.nome_arquivo,
-            'caminho': self.caminho,
             'size': self.tamanho,
             'fileSize': self.tamanho,
             'tamanho': self.tamanho,
@@ -330,22 +383,44 @@ class Arquivo(Base):
             'category': self.tipo_documento,
             'descricao': self.descricao,
             'description': self.descricao,
+            
+            # 🆕 DADOS DAS PASTAS
+            'pasta_id': self.pasta_id,
+            'pasta_nome': self.pasta.nome if self.pasta else None,
+            
+            # Dados do projeto
             'projeto_id': self.projeto_id,
             'projectId': self.projeto_id,
             'projeto_nome': self.projeto.nome if self.projeto else None,
+            
+            # 🆕 DADOS AWS
+            'storage_type': self.storage_type,
+            'aws_s3_url': self.aws_s3_url,
+            'aws_s3_key': self.aws_s3_key,
+            'is_cloud': self.storage_type in ['s3', 'hybrid'],
+            'is_database': self.storage_type == 'database',
+            'is_public': self.is_public,
+            
+            # URLs e compatibilidade
+            'url': self.aws_s3_url or self.cloud_url or f'/api/arquivos/{self.id}/download',
+            'download_url': f'/api/arquivos/{self.id}/download',
+            'preview_url': f'/api/arquivos/{self.id}/preview',
+            
+            # Campos legados (compatibilidade)
+            'caminho': self.caminho,
             'cloud_url': self.cloud_url,
-            'url': self.cloud_url or f'/api/arquivos/{self.id}/download',
             'cloud_id': self.cloud_id,
-            'is_cloud': bool(self.cloud_id),
-            'storage_type': 's3' if self.cloud_id else 'metadata',
             'tags': json.loads(self.tags) if self.tags else [],
+            
+            # Metadados
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'uploadDate': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'uploaded_by': self.uploaded_by
         }
     
     def __repr__(self):
-        return f"<Arquivo(id={self.id}, nome='{self.nome_original}', tamanho={self.tamanho})>"
+        return f"<Arquivo(id={self.id}, nome='{self.nome_original}', storage='{self.storage_type}')>"
 
 class Notificacao(Base):
     __tablename__ = 'notificacoes'
@@ -373,11 +448,13 @@ class Notificacao(Base):
 
 # ===== FUNÇÕES DE TESTE E INICIALIZAÇÃO =====
 def init_db():
-    """Inicializar banco de dados AWS RDS"""
+    """Inicializar banco de dados AWS RDS com novas tabelas"""
     try:
-        print("🔧 Criando tabelas no AWS RDS...")
+        print("🔧 Criando/atualizando tabelas no AWS RDS...")
+        
+        # 🆕 CRIAR NOVAS TABELAS (PASTAS)
         Base.metadata.create_all(bind=engine)
-        print("✅ Tabelas criadas no AWS RDS com sucesso")
+        print("✅ Tabelas criadas/atualizadas no AWS RDS com sucesso")
         
         # Listar tabelas criadas
         from sqlalchemy import inspect
@@ -385,9 +462,30 @@ def init_db():
         tables = inspector.get_table_names()
         print(f"📋 Tabelas no banco: {tables}")
         
+        # 🆕 VERIFICAR SE COLUNAS NOVAS FORAM ADICIONADAS
+        print("🔍 Verificando estrutura da tabela 'arquivos'...")
+        columns = [col['name'] for col in inspector.get_columns('arquivos')]
+        
+        required_columns = ['pasta_id', 'arquivo_blob', 'aws_s3_key', 'storage_type']
+        missing_columns = [col for col in required_columns if col not in columns]
+        
+        if missing_columns:
+            print(f"⚠️ Colunas faltando na tabela 'arquivos': {missing_columns}")
+            print("💡 Execute as migrações SQL manualmente:")
+            print("   ALTER TABLE arquivos ADD COLUMN pasta_id INTEGER REFERENCES pastas(id);")
+            print("   ALTER TABLE arquivos ADD COLUMN arquivo_blob BYTEA;")
+            print("   ALTER TABLE arquivos ADD COLUMN aws_s3_key VARCHAR(1000);")
+            print("   ALTER TABLE arquivos ADD COLUMN aws_s3_bucket VARCHAR(100);")
+            print("   ALTER TABLE arquivos ADD COLUMN aws_s3_url VARCHAR(2000);")
+            print("   ALTER TABLE arquivos ADD COLUMN storage_type VARCHAR(20) DEFAULT 'database';")
+            print("   ALTER TABLE arquivos ADD COLUMN is_public BOOLEAN DEFAULT FALSE;")
+            print("   ALTER TABLE arquivos ADD COLUMN uploaded_by VARCHAR(100);")
+        else:
+            print("✅ Estrutura da tabela 'arquivos' está atualizada")
+        
         return True
     except Exception as e:
-        print(f"❌ Erro ao criar tabelas no AWS RDS: {e}")
+        print(f"❌ Erro ao criar/atualizar tabelas no AWS RDS: {e}")
         return False
 
 def test_aws_connection():
@@ -419,21 +517,23 @@ def test_aws_connection():
         return False
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("🚀 TESTE DE CONFIGURAÇÃO AWS RDS")
-    print("=" * 60)
+    print("=" * 70)
+    print("🚀 TESTE DE CONFIGURAÇÃO AWS RDS + PASTAS VIRTUAIS")
+    print("=" * 70)
     
     if test_aws_connection():
         print("✅ Conexão OK")
         
         if init_db():
             print("✅ Inicialização OK")
-            print("\n🎉 AWS RDS CONFIGURADO COM SUCESSO!")
-            print("📋 Agora os uploads serão salvos no banco AWS!")
-            print("🔗 Metadados no RDS + Arquivos no S3")
+            print("\n🎉 AWS RDS + SISTEMA DE PASTAS CONFIGURADO COM SUCESSO!")
+            print("📁 Pastas virtuais: Habilitadas")
+            print("☁️ Armazenamento AWS: Habilitado")
+            print("💾 Banco de dados: Metadados + Arquivos pequenos")
+            print("📦 S3: Arquivos grandes")
         else:
             print("❌ Falha na inicialização")
     else:
         print("❌ Falha na conexão com AWS RDS")
         
-    print("=" * 60)
+    print("=" * 70)

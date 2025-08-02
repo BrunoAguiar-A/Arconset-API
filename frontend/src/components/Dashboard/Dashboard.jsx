@@ -1,4 +1,4 @@
-// 📁 src/components/Dashboard/Dashboard.jsx - VERSÃO ATUALIZADA COM MONITOR DE BOLETOS
+// 📁 src/components/Dashboard/Dashboard.jsx - ATUALIZAÇÃO PARA CloudFileManager
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { 
@@ -17,7 +17,8 @@ import {
   Users,
   Database,
   FileText,
-  Zap
+  Zap,
+  FolderOpen // 🚨 NOVO: Para pastas
 } from 'lucide-react';
 
 // 📋 COMPONENTES ORGANIZADOS
@@ -27,10 +28,12 @@ import ProjectsSection from './components/ProjectsSection';
 import BillsSection from './components/BillsSection';
 import Sidebar from './components/Sidebar';
 import Modal from './components/Modal';
-import FilesSection from './components/FilesSection';
 import NotificationsDropdown from './components/NotificationsDropdown';
 import SettingsModal from './components/SettingsModal';
 import SecureBankConfigPage from './pages/SecureBankConfigPage';
+
+// 🚨 SUBSTITUIR: FilesSection por CloudFileManager
+import CloudFileManager from './components/CloudFileManager'; // 🚨 NOVO IMPORT
 
 // 🚨 NOVO: Import do Monitor de Boletos
 import BoletoMonitor from './components/BoletoMonitor';
@@ -44,23 +47,23 @@ import { useAuth } from './hooks/useAuth';
 // 🎯 UTILITÁRIOS CENTRALIZADOS
 import { formatCurrency, formatDate } from './utils';
 
-// 🔐 CONFIGURAÇÕES DE PRODUÇÃO
+// 🔐 CONFIGURAÇÕES DE PRODUÇÃO (mesmo código anterior)
 const DASHBOARD_CONFIG = {
-  AUTO_LOGOUT_TIME: 60 * 60 * 1000, // 1 hora
-  SESSION_CHECK_INTERVAL: 10 * 60 * 1000, // 10 minutos
+  AUTO_LOGOUT_TIME: 60 * 60 * 1000,
+  SESSION_CHECK_INTERVAL: 10 * 60 * 1000,
   MAX_FAILED_REQUESTS: 5,
-  SENSITIVE_DATA_CLEANUP: 10 * 60 * 1000, // 10 minutos
-  HEALTH_CHECK_ENABLED: false, // 🚨 DESABILITADO em produção
+  SENSITIVE_DATA_CLEANUP: 10 * 60 * 1000,
+  HEALTH_CHECK_ENABLED: false,
   SECURITY_ALERTS_ENABLED: true,
-  REQUEST_TIMEOUT: 30000, // 30 segundos
+  REQUEST_TIMEOUT: 30000,
   PRODUCTION_MODE: true,
-  DEBUG_ENABLED: false, // 🚨 DESABILITADO em produção
+  DEBUG_ENABLED: false,
   MANUAL_REFRESH_ENABLED: true,
-  AUTO_REFRESH_ENABLED: false // 🚨 DESABILITADO em produção
+  AUTO_REFRESH_ENABLED: false
 };
 
 const Dashboard = () => {
-  // 🔧 ESTADOS PRINCIPAIS
+  // 🔧 ESTADOS PRINCIPAIS (mesmo código anterior)
   const [activeTab, setActiveTab] = useState('dashboard');
   const [systemStatus, setSystemStatus] = useState({
     online: true,
@@ -71,6 +74,10 @@ const Dashboard = () => {
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [failedRequests, setFailedRequests] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // 🚨 REMOVER: Estados antigos de arquivos
+  // const [filesData, setFilesData] = useState([]);
+  // const [filesLoading, setFilesLoading] = useState(false);
   
   // 🎨 ESTADOS DE UI
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
@@ -91,7 +98,7 @@ const Dashboard = () => {
     handleInputChange 
   } = useModal();
 
-  // 🏦 HOOK BANCÁRIO OTIMIZADO
+  // 🏦 HOOK BANCÁRIO OTIMIZADO (mesmo código anterior)
   const {
     boletos: boletosBancarios = [],
     loading: loadingBoletos = false,
@@ -103,7 +110,6 @@ const Dashboard = () => {
     bancosConfigurados = {},
     isSecure = false,
     userBankProfile,
-    // 🚨 NOVAS FUNÇÕES PARA O MONITOR
     manualInit,
     resetMonitor,
     hasConfiguredBanks,
@@ -116,7 +122,7 @@ const Dashboard = () => {
   const failedRequestsRef = useRef(0);
   const refreshTimeoutRef = useRef(null);
 
-  // 📊 ESTATÍSTICAS MEMOIZADAS
+  // 📊 ESTATÍSTICAS MEMOIZADAS (mesmo código anterior)
   const estatisticasBoletos = useMemo(() => {
     try {
       return getEstatisticas();
@@ -133,6 +139,8 @@ const Dashboard = () => {
     }
   }, [getEstatisticas]);
 
+  // ... TODAS AS OUTRAS FUNÇÕES MANTIDAS IGUAIS (addSecurityAlert, checkSystemHealth, etc.)
+  
   // 🔐 SISTEMA DE ALERTAS DE SEGURANÇA
   const addSecurityAlert = useCallback((type, message, autoHide = true) => {
     if (!DASHBOARD_CONFIG.SECURITY_ALERTS_ENABLED) {
@@ -258,6 +266,8 @@ const Dashboard = () => {
       addSecurityAlert('error', 'Erro ao inicializar monitor de boletos');
     }
   }, [manualInit, addSecurityAlert]);
+
+  // ... TODOS OS OUTROS useEffect E FUNÇÕES MANTIDOS IGUAIS ...
 
   // 🔐 INICIALIZAÇÃO DE PRODUÇÃO
   useEffect(() => {
@@ -439,7 +449,7 @@ const Dashboard = () => {
     }
   }, [updateActivity, addSecurityAlert, handleSecureLogout]);
 
-  // 🛠️ FUNÇÕES CRUD (mantidas iguais)
+  // 🛠️ FUNÇÕES CRUD (mantidas iguais do código anterior)
   const handleCreateItem = useCallback(async (type, itemData) => {
     try {
       let endpoint = '';
@@ -595,6 +605,9 @@ const Dashboard = () => {
     }
   }, [handleSecureRequest, loadData, addSecurityAlert]);
 
+  // 🚨 REMOVER: Funções antigas de arquivos (loadFiles, etc.)
+  // Tudo isso será gerenciado pelo CloudFileManager agora
+
   // 📋 COPIAR CÓDIGO DE BARRAS
   const copiarCodigoBarras = useCallback(async (codigo) => {
     try {
@@ -642,7 +655,7 @@ const Dashboard = () => {
     }
   }, []);
 
-  // 🎨 LOADING STATE
+  // 🎨 LOADING STATE (mesmo código anterior)
   if (loading && !data.projects && !data.clientes) {
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
@@ -659,7 +672,7 @@ const Dashboard = () => {
     );
   }
 
-  // 🎨 ERROR STATE
+  // 🎨 ERROR STATE (mesmo código anterior)
   if (error && !data.projects && !data.clientes) {
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
@@ -682,7 +695,7 @@ const Dashboard = () => {
     );
   }
 
-  // 📋 RENDERIZAR CONTEÚDO POR ABA - NOVA LÓGICA ORGANIZADA
+  // 📋 RENDERIZAR CONTEÚDO POR ABA - VERSÃO ATUALIZADA
   const renderContent = () => {
     // Props comuns que todos os componentes precisam
     const commonProps = {
@@ -720,6 +733,36 @@ const Dashboard = () => {
             userBankProfile={userBankProfile}
             isRefreshing={isRefreshing}
           />
+        );
+      
+      // 🚨 NOVA ABA: Sistema de Arquivos e Pastas
+      case 'files':
+        return (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-cyan-100 rounded-lg flex items-center justify-center">
+                    <FolderOpen className="w-6 h-6 text-cyan-600" />
+                  </div>
+                  📁 Gerenciador de Arquivos
+                </h1>
+                <p className="text-gray-600 mt-2">
+                  Sistema completo de pastas virtuais e armazenamento em nuvem
+                </p>
+              </div>
+            </div>
+            
+            {/* 🚨 USAR O CloudFileManager */}
+            <CloudFileManager 
+              user={user}
+              isAdmin={isAdmin}
+              onSecurityAlert={addSecurityAlert}
+              onError={(error) => addSecurityAlert('error', error)}
+              onSuccess={(message) => addSecurityAlert('success', message)}
+              onActivity={updateActivity}
+            />
+          </div>
         );
       
       case 'projects': 
@@ -803,10 +846,6 @@ const Dashboard = () => {
       case 'boleto-monitor':
         return (
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
-            </div>
-            
-            {/* Renderizar o componente BoletoMonitor */}
             <BoletoMonitor 
               boletos={boletosBancarios}
               loading={loadingBoletos}
@@ -829,52 +868,6 @@ const Dashboard = () => {
 
       case 'bank-config':
         return <SecureBankConfigPage />;
-      
-      case 'files':
-        return (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-cyan-100 rounded-lg flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-cyan-600" />
-                  </div>
-                  📁 Arquivos
-                </h1>
-                <p className="text-gray-600 mt-2">
-                  {data.files?.length || 0} arquivo(s) no sistema
-                </p>
-              </div>
-              <button 
-                onClick={() => {
-                  // Implementar upload de arquivos
-                  alert('Funcionalidade de upload em desenvolvimento');
-                }}
-                className="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700 transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <FileText className="w-5 h-5" />
-                Upload Arquivo
-              </button>
-            </div>
-            <FilesSection 
-              files={data.files || []}
-              projects={data.projects || []}
-              onUpload={(files) => {
-                console.log('Arquivos para upload:', files);
-                // Implementar lógica de upload
-              }}
-              onDelete={(fileId) => {
-                console.log('Excluir arquivo:', fileId);
-                // Implementar lógica de exclusão
-              }}
-              onPreview={(file) => {
-                console.log('Preview do arquivo:', file);
-                // Implementar preview
-              }}
-              loading={isRefreshing}
-            />
-          </div>
-        );
 
       case 'users':
         if (!isAdmin()) {
@@ -1000,6 +993,12 @@ const Dashboard = () => {
                       🏦 {estatisticasBoletos.total} boletos
                     </span>
                   )}
+                  {/* 🚨 NOVO: Badge para arquivos */}
+                  {activeTab === 'files' && (
+                    <span className="text-xs bg-cyan-100 text-cyan-700 px-2 py-1 rounded-full font-medium">
+                      📁 Gerenciador
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="h-6 w-px bg-gray-300"></div>
@@ -1010,7 +1009,7 @@ const Dashboard = () => {
                  activeTab === 'bills' ? '💰 Contas a Pagar' :
                  activeTab === 'boleto-monitor' ? '🏦 Monitor de Boletos' :
                  activeTab === 'bank-config' ? '⚙️ Configuração Bancária' :
-                 activeTab === 'files' ? '📁 Arquivos' :
+                 activeTab === 'files' ? '📁 Gerenciador de Arquivos' :
                  activeTab === 'users' ? '👤 Usuários' :
                  '📄 Página'}
               </h2>
@@ -1037,6 +1036,14 @@ const Dashboard = () => {
                   <Lock className="w-3 h-3" />
                   <span>{isSecure ? 'Protegido' : 'Seguro'}</span>
                 </div>
+                
+                {/* 🚨 NOVO: Indicador para arquivos em nuvem */}
+                {activeTab === 'files' && (
+                  <div className="flex items-center gap-1 text-sm text-cyan-600">
+                    <Database className="w-3 h-3" />
+                    <span>Nuvem</span>
+                  </div>
+                )}
                 
                 {/* REFRESH MANUAL */}
                 <button 
