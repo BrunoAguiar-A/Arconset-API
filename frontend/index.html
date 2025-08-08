@@ -1,0 +1,44 @@
+<!-- 📁 index.html - PRODUÇÃO DEFINITIVA -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sistema - Arconset</title>
+    
+    <!-- Tailwind CSS - PRODUÇÃO DEFINITIVA -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Configurações de produção -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'hvac-blue': '#3B82F6',
+              'hvac-green': '#10B981',
+              'hvac-purple': '#8B5CF6',
+              'hvac-red': '#EF4444'
+            },
+            fontFamily: {
+              'hvac': ['Inter', 'system-ui', 'sans-serif']
+            }
+          }
+        },
+        corePlugins: {
+          preflight: true,
+        }
+      }
+    </script>
+    
+    <!-- Web Fonts para produção -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

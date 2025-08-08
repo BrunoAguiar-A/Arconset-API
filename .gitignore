@@ -1,0 +1,24 @@
+# Produ��o - n�o commitar
+.env
+*.log
+logs/
+backup_development/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.coverage
+.pytest_cache/
+htmlcov/
+.DS_Store
+Thumbs.db
+.env.backup
+.env.backup2
+update.py
+app/database_backup.py
